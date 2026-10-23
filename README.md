@@ -47,6 +47,14 @@ chapters are as upstream has them. (At the top level it adds this section and a 
   ignore these allocations.) It also sleeps a second after starting each thread.
 - **Shutdown is slow:** each `MEOrderBook`'s destructor clears its 2 GB table of client orders,
   which takes seconds per book.
+- **Market data leaves the machine.** `exchange_main` names the loopback interface (`lo`) for its
+  market data, but `createSocket()` uses the interface name only when it is given no address, and
+  it always is, and sets no outgoing interface: so the exchange sends its multicast on the interface
+  the system routes the groups to (on a machine with Wi-Fi, onto the local network; the default
+  time-to-live of 1 keeps it on the subnet), and the system loops a copy back to listeners on the
+  machine, which join on the default interface too (checked 2026-10-23: `ip route get 233.252.14.3`
+  names the Wi-Fi interface). Fixing it means choosing the interface in the publisher and in every
+  listener, the clients and Fillscope's viewer alike.
 - **`createSocket()` doesn't check `connect()`:** it compares the result with 1, which `connect()`
   never returns. (Comparing with -1 would fail the non-blocking connect it makes, which reports
   "in progress" as -1.)
@@ -58,7 +66,7 @@ under the original MIT license ([LICENSE](LICENSE)).
 
 **Testing it** (from `Chapter12/`): `cmake -S . -B build -DLOWLATENCY_TESTS=ON && cmake --build build
 && ctest --test-dir build --output-on-failure`. The tests take about 8 seconds and 3 GB of memory
-(the exchange's objects preallocate their pools), and use multicast on the loopback interface.
+(the exchange's objects preallocate their pools), and use multicast, looped back to this machine.
 
 **Running it** (from `Chapter12/`): `bash scripts/build.sh` builds both configurations. Then start
 the exchange, `./cmake-build-release/exchange_main &`, wait ten seconds, and start the clients,

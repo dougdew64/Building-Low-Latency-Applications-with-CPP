@@ -1,4 +1,4 @@
-// The market data as it leaves the exchange, received over multicast on the loopback interface:
+// The market data as it leaves the exchange, received over multicast (looped back to this machine):
 // the incremental feed's sequence numbers, and a snapshot's content. Test-only groups and ports,
 // unlike the exchange's (233.252.14.x, ports 20000 and 20001), so a running exchange can't
 // interfere, and one each, so the tests can't interfere with one another.
