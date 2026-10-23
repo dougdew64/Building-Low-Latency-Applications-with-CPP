@@ -7,15 +7,49 @@ system does and explains it from its exact state. `main` follows upstream unchan
 
 **What the branch changes** in the code, only in `Chapter12/`, the complete system; the other
 chapters are as upstream has them. (At the top level it adds this section and a `CLAUDE.md`.)
-- `Chapter12/CMakeLists.txt` requires CMake 3.10 rather than 3.0, which CMake 4 no longer accepts
-  (and below 3.10, deprecates). With that, the book's code builds unchanged with GCC 16.2.1 under
-  its own `-Werror`, in both configurations of `scripts/build.sh`, and with no warnings from CMake
-  4.3.
+- **The build:** `Chapter12/CMakeLists.txt` requires CMake 3.10 rather than 3.0, which CMake 4 no
+  longer accepts (and below 3.10, deprecates), and no longer sets `CMAKE_CXX_COMPILER` after
+  `project()`, which CMake doesn't support and which broke any project added after it (GoogleTest);
+  the compiler is chosen as usual (`CXX`). The book's code builds with GCC 16.2.1 under its own
+  `-Werror`, in both configurations of `scripts/build.sh`.
+- **Tests,** in `Chapter12/tests/`, built with `-DLOWLATENCY_TESTS=ON` (off by default, so the
+  book's own build is unchanged) and run by `ctest` and by this fork's CI, normally and under
+  AddressSanitizer and UndefinedBehaviorSanitizer: the market data's layout on the wire; the
+  matching (price-time priority, partial fills, sweeps across price levels, cancels and rejected
+  cancels); the incremental feed's sequence numbers; a snapshot's content. To call the snapshot
+  synthesizer from them, `addToSnapshot()` and `publishSnapshot()` now declare their return type
+  (`-> void`), which they deduced, so no other file could call them.
+- **Bugs fixed,** each found by a test that failed before its fix:
+  - `MEOrderBook`'s table of every client's orders was never initialized, so cancelling an order
+    that was never sent read a garbage pointer (the sanitizer build crashed; elsewhere the system's
+    zeroed memory hid it). It is now allocated zeroed by `calloc`, which doesn't touch its 2 GB.
+  - With that table out of the book, the book's table of price levels turned out never to be
+    initialized either: it had read as empty only because the 2 GB table made every book a fresh
+    mapping of zeroed memory. It is now value-initialized.
+  - `createSocket()` never freed the list `getaddrinfo()` returned (LeakSanitizer).
+
+**Known issues,** not fixed (yet):
+- **Prices 256 or more ticks apart in one book corrupt it.** Price levels are kept in a table of
+  256 slots, indexed by `price % 256`: a bid at 356 joins the queue of the level at 100, and a sell
+  at 101 then doesn't trade with it, leaving the book crossed (checked 2026-10-23). The clients'
+  prices stay within a narrow range.
+- **Threads are never joined.** `createAndStartThread()` allocates each `std::thread` with `new`,
+  and the components' `start()` functions drop the pointer. (The tests tell LeakSanitizer to
+  ignore these allocations.) It also sleeps a second after starting each thread.
+- **Shutdown is slow:** each `MEOrderBook`'s destructor clears its 2 GB table of client orders,
+  which takes seconds per book.
+- **`createSocket()` doesn't check `connect()`:** it compares the result with 1, which `connect()`
+  never returns. (Comparing with -1 would fail the non-blocking connect it makes, which reports
+  "in progress" as -1.)
 
 More changes follow, each listed here, as Fillscope's
-[plan](https://github.com/dougdew64/fillscope/blob/main/docs/PLAN.md) proceeds: tests of what
-Fillscope relies on, then deterministic replay. A bug found in the book's code is fixed here, with
-a test, and listed. The code remains under the original MIT license ([LICENSE](LICENSE)).
+[plan](https://github.com/dougdew64/fillscope/blob/main/docs/PLAN.md) proceeds, next deterministic
+replay. A bug found in the book's code is fixed here, with a test, and listed. The code remains
+under the original MIT license ([LICENSE](LICENSE)).
+
+**Testing it** (from `Chapter12/`): `cmake -S . -B build -DLOWLATENCY_TESTS=ON && cmake --build build
+&& ctest --test-dir build --output-on-failure`. The tests take about 8 seconds and 3 GB of memory
+(the exchange's objects preallocate their pools), and use multicast on the loopback interface.
 
 **Running it** (from `Chapter12/`): `bash scripts/build.sh` builds both configurations. Then start
 the exchange, `./cmake-build-release/exchange_main &`, wait ten seconds, and start the clients,
