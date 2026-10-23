@@ -7,9 +7,10 @@ system does and explains it from its exact state. `main` follows upstream unchan
 
 **What the branch changes** in the code, only in `Chapter12/`, the complete system; the other
 chapters are as upstream has them. (At the top level it adds this section and a `CLAUDE.md`.)
-- `Chapter12/CMakeLists.txt` requires CMake 3.5 rather than 3.0, which CMake 4 no longer accepts.
-  With that, the book's code builds unchanged with GCC 16.2.1 under its own `-Werror`, in both
-  configurations of `scripts/build.sh`.
+- `Chapter12/CMakeLists.txt` requires CMake 3.10 rather than 3.0, which CMake 4 no longer accepts
+  (and below 3.10, deprecates). With that, the book's code builds unchanged with GCC 16.2.1 under
+  its own `-Werror`, in both configurations of `scripts/build.sh`, and with no warnings from CMake
+  4.3.
 
 More changes follow, each listed here, as Fillscope's
 [plan](https://github.com/dougdew64/fillscope/blob/main/docs/PLAN.md) proceeds: tests of what
