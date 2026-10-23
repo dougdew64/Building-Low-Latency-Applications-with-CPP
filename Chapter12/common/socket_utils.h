@@ -140,6 +140,7 @@ namespace Common {
       }
     }
 
+    freeaddrinfo(result);  // Fillscope's fork: the list getaddrinfo() allocated was never freed.
     return socket_fd;
   }
 }
