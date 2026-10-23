@@ -19,6 +19,10 @@ chapters are as upstream has them. (At the top level it adds this section and a 
   cancels); the incremental feed's sequence numbers; a snapshot's content. To call the snapshot
   synthesizer from them, `addToSnapshot()` and `publishSnapshot()` now declare their return type
   (`-> void`), which they deduced, so no other file could call them.
+- **An option for tests:** `exchange_main --snapshot-interval-seconds SECONDS` sets how often the
+  exchange publishes a snapshot (the book's 60 s by default), so a test of recovering from a
+  snapshot need not wait a minute; the snapshot synthesizer and the market data publisher take it
+  as a constructor argument with that default. Without arguments the exchange runs as before.
 - **Bugs fixed,** each found by a test that failed before its fix:
   - `MEOrderBook`'s table of every client's orders was never initialized, so cancelling an order
     that was never sent read a garbage pointer (the sanitizer build crashed; elsewhere the system's

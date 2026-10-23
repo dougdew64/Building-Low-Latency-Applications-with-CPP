@@ -9,7 +9,8 @@ namespace Exchange {
   public:
     MarketDataPublisher(MEMarketUpdateLFQueue *market_updates, const std::string &iface,
                         const std::string &snapshot_ip, int snapshot_port,
-                        const std::string &incremental_ip, int incremental_port);
+                        const std::string &incremental_ip, int incremental_port,
+                        Nanos snapshot_interval = 60 * NANOS_TO_SECS);  // Fillscope's fork: passed to the snapshot synthesizer
 
     ~MarketDataPublisher() {
       stop();

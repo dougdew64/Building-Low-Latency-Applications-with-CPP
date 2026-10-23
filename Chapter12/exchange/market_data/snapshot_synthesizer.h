@@ -16,8 +16,11 @@ using namespace Common;
 namespace Exchange {
   class SnapshotSynthesizer {
   public:
+    /// Fillscope's fork: `snapshot_interval` is how often a snapshot is published (the book's 60 s by
+    /// default), so a test of snapshot recovery need not wait a minute for one.
     SnapshotSynthesizer(MDPMarketUpdateLFQueue *market_updates, const std::string &iface,
-                        const std::string &snapshot_ip, int snapshot_port);
+                        const std::string &snapshot_ip, int snapshot_port,
+                        Nanos snapshot_interval = 60 * NANOS_TO_SECS);
 
     ~SnapshotSynthesizer();
 
@@ -63,6 +66,7 @@ namespace Exchange {
     std::array<std::array<MEMarketUpdate *, ME_MAX_ORDER_IDS>, ME_MAX_TICKERS> ticker_orders_;
     size_t last_inc_seq_num_ = 0;
     Nanos last_snapshot_time_ = 0;
+    Nanos snapshot_interval_ = 60 * NANOS_TO_SECS;
 
     /// Memory pool to manage MEMarketUpdate messages for the orders in the snapshot limit order books.
     MemPool<MEMarketUpdate> order_pool_;

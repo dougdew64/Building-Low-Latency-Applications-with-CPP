@@ -1,4 +1,8 @@
 #include <csignal>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <string>
 
 #include "matcher/matching_engine.h"
 #include "market_data/market_data_publisher.h"
@@ -29,7 +33,21 @@ void signal_handler(int) {
   exit(EXIT_SUCCESS);
 }
 
-int main(int, char **) {
+int main(int argc, char **argv) {
+  // Fillscope's fork: one option, how often the snapshot synthesizer publishes a snapshot (the book's
+  // 60 s by default), so a test of snapshot recovery need not wait a minute for one.
+  Common::Nanos snapshot_interval = 60 * Common::NANOS_TO_SECS;
+  for (int i = 1; i < argc; ++i) {
+    char *end = nullptr;
+    const double seconds = (i + 1 < argc) ? std::strtod(argv[i + 1], &end) : 0;
+    if (std::strcmp(argv[i], "--snapshot-interval-seconds") != 0 || end == argv[i + 1] || *end != '\0' || !(seconds > 0)) {
+      std::cerr << "usage: exchange_main [--snapshot-interval-seconds SECONDS]  (SECONDS > 0; default 60)" << std::endl;
+      return 2;
+    }
+    snapshot_interval = static_cast<Common::Nanos>(seconds * Common::NANOS_TO_SECS);
+    ++i;
+  }
+
   logger = new Common::Logger("exchange_main.log");
 
   std::signal(SIGINT, signal_handler);
@@ -52,7 +70,8 @@ int main(int, char **) {
   const int snap_pub_port = 20000, inc_pub_port = 20001;
 
   logger->log("%:% %() % Starting Market Data Publisher...\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str));
-  market_data_publisher = new Exchange::MarketDataPublisher(&market_updates, mkt_pub_iface, snap_pub_ip, snap_pub_port, inc_pub_ip, inc_pub_port);
+  market_data_publisher = new Exchange::MarketDataPublisher(&market_updates, mkt_pub_iface, snap_pub_ip, snap_pub_port, inc_pub_ip, inc_pub_port,
+                                                            snapshot_interval);
   market_data_publisher->start();
 
   const std::string order_gw_iface = "lo";

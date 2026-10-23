@@ -147,3 +147,23 @@ TEST(SnapshotSynthesizer, ASnapshotHoldsEveryLiveOrderAsItIsNow) {
     EXPECT_EQ(fields(received[i].me_market_update_), fields(expected[i])) << "update " << i;
   }
 }
+
+TEST(SnapshotSynthesizer, PublishesASnapshotEveryInterval) {
+  Receiver snapshots("233.252.15.7", 21003);
+  // A tenth of a second, where the book has a minute. Never destroyed, as above; stopped at the end.
+  static auto *const queue = new MDPMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
+  static auto *const synthesizer =
+      new SnapshotSynthesizer(queue, "lo", "233.252.15.7", 21003, Common::NANOS_TO_SECS / 10);
+  synthesizer->start();
+  // Each snapshot of an empty book: a start, a clear for each ticker, an end. Three arrive within
+  // the second receive() waits only if the interval is a fraction of it: with the book's minute, one.
+  const size_t per_snapshot = 2 + Common::ME_MAX_TICKERS;
+  const auto received = snapshots.receive(3 * per_snapshot);
+  synthesizer->stop();
+
+  size_t starts = 0;
+  for (const auto &update : received) {
+    starts += value(update.me_market_update_.type_) == U::SNAPSHOT_START;
+  }
+  EXPECT_EQ(starts, 3u);
+}

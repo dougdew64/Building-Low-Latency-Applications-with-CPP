@@ -2,8 +2,9 @@
 
 namespace Exchange {
   SnapshotSynthesizer::SnapshotSynthesizer(MDPMarketUpdateLFQueue *market_updates, const std::string &iface,
-                                           const std::string &snapshot_ip, int snapshot_port)
-      : snapshot_md_updates_(market_updates), logger_("exchange_snapshot_synthesizer.log"), snapshot_socket_(logger_), order_pool_(ME_MAX_ORDER_IDS) {
+                                           const std::string &snapshot_ip, int snapshot_port, Nanos snapshot_interval)
+      : snapshot_md_updates_(market_updates), logger_("exchange_snapshot_synthesizer.log"), snapshot_socket_(logger_),
+        snapshot_interval_(snapshot_interval), order_pool_(ME_MAX_ORDER_IDS) {
     ASSERT(snapshot_socket_.init(snapshot_ip, iface, snapshot_port, /*is_listening*/ false) >= 0,
            "Unable to create snapshot mcast socket. error:" + std::string(std::strerror(errno)));
     for(auto& orders : ticker_orders_)
@@ -123,7 +124,7 @@ namespace Exchange {
         snapshot_md_updates_->updateReadIndex();
       }
 
-      if (getCurrentNanos() - last_snapshot_time_ > 60 * NANOS_TO_SECS) {
+      if (getCurrentNanos() - last_snapshot_time_ > snapshot_interval_) {
         last_snapshot_time_ = getCurrentNanos();
         publishSnapshot();
       }
