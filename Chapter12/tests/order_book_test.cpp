@@ -165,6 +165,28 @@ TEST_F(OrderBookTest, ABuySweepTakesTheAsksBestPriceFirst) {
   EXPECT_EQ(traded, (std::vector<Price>{98, 99, 100, 101, 102, 103}));
 }
 
+// The book kept its levels in an array indexed by price % 256, so a bid at 356 joined the queue of
+// the level at 100, and a sell at 101 then rested instead of trading with it: a crossed book.
+TEST_F(OrderBookTest, PricesFarApartHaveLevelsOfTheirOwn) {
+  add(1, 10, Side::BUY, 100, 1);  // market order id 1
+  expectSent(add(1, 11, Side::BUY, 356, 1).updates, {update(U::ADD, 2, Side::BUY, 356, 1, 1)}, "the second bid, a level of its own");
+  const auto sent = add(2, 20, Side::SELL, 101, 2);
+  expectSent(sent.updates, {update(U::TRADE, OrderId_INVALID, Side::SELL, 356, 1, Priority_INVALID),
+                            update(U::CANCEL, 2, Side::BUY, 356, 1, Priority_INVALID),
+                            update(U::ADD, 3, Side::SELL, 101, 1, 1)}, "a sell at 101: trades with 356 only");
+  const auto at_100 = add(3, 30, Side::SELL, 100, 1);
+  expectSent(at_100.updates, {update(U::TRADE, OrderId_INVALID, Side::SELL, 100, 1, Priority_INVALID),
+                              update(U::CANCEL, 1, Side::BUY, 100, 1, Priority_INVALID)}, "a sell at 100: trades with 100");
+}
+
+TEST_F(OrderBookTest, ABidAndAnAskFarApartBothRest) {
+  expectSent(add(1, 10, Side::SELL, 356, 1).updates, {update(U::ADD, 1, Side::SELL, 356, 1, 1)}, "the ask");
+  expectSent(add(2, 20, Side::BUY, 100, 1).updates, {update(U::ADD, 2, Side::BUY, 100, 1, 1)}, "the bid");
+  const auto sent = add(3, 30, Side::BUY, 356, 1);
+  expectSent(sent.updates, {update(U::TRADE, OrderId_INVALID, Side::BUY, 356, 1, Priority_INVALID),
+                            update(U::CANCEL, 1, Side::SELL, 356, 1, Priority_INVALID)}, "a buy at 356: trades with the ask");
+}
+
 TEST_F(OrderBookTest, ACancelRemovesTheOrder) {
   add(1, 10, Side::BUY, 100, 5);
   const auto sent = cancel(1, 10);

@@ -10,6 +10,7 @@
 #include "market_data/market_update.h"
 
 #include "me_order.h"
+#include "price_level_table.h"
 
 using namespace Common;
 
@@ -69,9 +70,9 @@ namespace Exchange {
     MEOrdersAtPrice *asks_by_price_ = nullptr;
 
     /// Hash map from Price -> MEOrdersAtPrice.
-    /// Fillscope's fork: value-initialized, all null. It was never initialized, and read as empty
-    /// only while the table above made every book a fresh, zeroed mapping of its own.
-    OrdersAtPriceHashMap price_orders_at_price_{};
+    /// Fillscope's fork: keyed by the exact price (price_level_table.h). It was an array indexed by
+    /// price % ME_MAX_PRICE_LEVELS, so prices that many ticks apart shared a level.
+    PriceLevelTable price_orders_at_price_;
 
     /// Memory pool to manage MEOrder objects.
     MemPool<MEOrder> order_pool_;
@@ -90,18 +91,14 @@ namespace Exchange {
       return next_market_order_id_++;
     }
 
-    auto priceToIndex(Price price) const noexcept {
-      return (price % ME_MAX_PRICE_LEVELS);
-    }
-
     /// Fetch and return the MEOrdersAtPrice corresponding to the provided price.
     auto getOrdersAtPrice(Price price) const noexcept -> MEOrdersAtPrice * {
-      return price_orders_at_price_.at(priceToIndex(price));
+      return price_orders_at_price_.find(price);
     }
 
     /// Add a new MEOrdersAtPrice at the correct price into the containers - the hash map and the doubly linked list of price levels.
     auto addOrdersAtPrice(MEOrdersAtPrice *new_orders_at_price) noexcept {
-      price_orders_at_price_.at(priceToIndex(new_orders_at_price->price_)) = new_orders_at_price;
+      price_orders_at_price_.insert(new_orders_at_price);
 
       const auto best_orders_by_price = (new_orders_at_price->side_ == Side::BUY ? bids_by_price_ : asks_by_price_);
       if (UNLIKELY(!best_orders_by_price)) {
@@ -164,7 +161,7 @@ namespace Exchange {
         orders_at_price->prev_entry_ = orders_at_price->next_entry_ = nullptr;
       }
 
-      price_orders_at_price_.at(priceToIndex(price)) = nullptr;
+      price_orders_at_price_.erase(price);
 
       orders_at_price_pool_.deallocate(orders_at_price);
     }

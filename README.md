@@ -27,12 +27,17 @@ chapters are as upstream has them. (At the top level it adds this section and a 
     initialized either: it had read as empty only because the 2 GB table made every book a fresh
     mapping of zeroed memory. It is now value-initialized.
   - `createSocket()` never freed the list `getaddrinfo()` returned (LeakSanitizer).
+  - Prices 256 or more ticks apart in one book corrupted it. Price levels were kept in an array of
+    256 slots indexed by `price % 256`, so a bid at 356 joined the queue of the level at 100, and
+    a sell at 101 then rested instead of trading with it, leaving the book crossed. Levels are now
+    found by their exact price, in `PriceLevelTable` (`exchange/matcher/price_level_table.h`): a
+    hash table in a fixed array, so it allocates nothing, with linear probing and backward-shift
+    deletion, tested against `std::map` through random inserts and removals.
 
 **Known issues,** not fixed (yet):
-- **Prices 256 or more ticks apart in one book corrupt it.** Price levels are kept in a table of
-  256 slots, indexed by `price % 256`: a bid at 356 joins the queue of the level at 100, and a sell
-  at 101 then doesn't trade with it, leaving the book crossed (checked 2026-10-23). The clients'
-  prices stay within a narrow range.
+- **A book holds at most 255 price levels at once.** Its pool of levels has 256 blocks, and taking
+  the last one stops the program ("Memory Pool out of space"). The book's clients use a few; a
+  deep book of real prices could need more.
 - **Threads are never joined.** `createAndStartThread()` allocates each `std::thread` with `new`,
   and the components' `start()` functions drop the pointer. (The tests tell LeakSanitizer to
   ignore these allocations.) It also sleeps a second after starting each thread.
