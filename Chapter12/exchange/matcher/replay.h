@@ -1,0 +1,32 @@
+#pragma once
+
+// Fillscope's fork: replaying a recording of the matcher's requests (request_recording.h) through a
+// matching engine, with no clients and no network, and the market data it publishes.
+//
+// The market data file: 8 bytes, "LLMDAT01"; the recording's path, as a 4-byte length and its bytes;
+// then each incremental update as the market data publisher sends it, an MDPMarketUpdate's packed
+// bytes, numbered from 1. So after the header, the file is byte for byte the incremental stream a
+// live exchange published for the same requests.
+
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "market_data/market_update.h"
+#include "matcher/matching_engine.h"
+#include "order_server/client_request.h"
+#include "order_server/client_response.h"
+
+namespace Exchange {
+  inline constexpr char kMarketDataMagic[8] = {'L', 'L', 'M', 'D', 'A', 'T', '0', '1'};
+
+  /// Feeds `requests` to `engine`, which must be fresh and not started, in order, as its run() does,
+  /// and returns the market updates it publishes, numbered from 1 as the market data publisher
+  /// numbers them. The engine writes into `updates` and `responses`, which are emptied as it goes.
+  auto replay(const std::vector<MEClientRequest> &requests, MatchingEngine &engine, MEMarketUpdateLFQueue &updates,
+              ClientResponseLFQueue &responses) -> std::vector<MDPMarketUpdate>;
+
+  /// Writes the market data file; returns why it couldn't, if it couldn't.
+  auto writeMarketData(const std::string &path, const std::string &recording_path,
+                       const std::vector<MDPMarketUpdate> &updates) -> std::optional<std::string>;
+}

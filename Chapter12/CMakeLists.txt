@@ -23,6 +23,10 @@ include_directories(${PROJECT_SOURCE_DIR}/trading)
 add_executable(exchange_main exchange/exchange_main.cpp)
 target_link_libraries(exchange_main PUBLIC ${LIBS})
 
+# Fillscope's fork: replays a recording of the exchange's requests (exchange/matcher/replay.h).
+add_executable(exchange_replay exchange/exchange_replay.cpp)
+target_link_libraries(exchange_replay PUBLIC ${LIBS})
+
 add_executable(trading_main trading/trading_main.cpp)
 target_link_libraries(trading_main PUBLIC ${LIBS})
 

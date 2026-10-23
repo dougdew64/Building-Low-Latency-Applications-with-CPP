@@ -23,6 +23,13 @@ chapters are as upstream has them. (At the top level it adds this section and a 
   exchange publishes a snapshot (the book's 60 s by default), so a test of recovering from a
   snapshot need not wait a minute; the snapshot synthesizer and the market data publisher take it
   as a constructor argument with that default. Without arguments the exchange runs as before.
+- **Deterministic replay:** `exchange_main --record FILE` records the requests the matching engine
+  processes, in the order it processes them (`exchange/matcher/request_recording.h`), and a new
+  program, `exchange_replay RECORDING MARKET_DATA_FILE`, feeds them through a fresh matching engine,
+  with no clients and no network, and writes the incremental market updates it publishes
+  (`exchange/matcher/replay.h`). The matcher is single-threaded and reads no clock, so a recording
+  replays to the very updates the live exchange published, byte for byte: Fillscope's system test
+  checks it against a live run.
 - **Bugs fixed,** each found by a test that failed before its fix:
   - `MEOrderBook`'s table of every client's orders was never initialized, so cancelling an order
     that was never sent read a garbage pointer (the sanitizer build crashed; elsewhere the system's

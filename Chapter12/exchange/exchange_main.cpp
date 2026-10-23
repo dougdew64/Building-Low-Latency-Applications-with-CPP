@@ -7,6 +7,7 @@
 #include "matcher/matching_engine.h"
 #include "market_data/market_data_publisher.h"
 #include "order_server/order_server.h"
+#include "matcher/request_recording.h"
 
 /// Main components, made global to be accessible from the signal handler.
 Common::Logger *logger = nullptr;
@@ -34,18 +35,36 @@ void signal_handler(int) {
 }
 
 int main(int argc, char **argv) {
-  // Fillscope's fork: one option, how often the snapshot synthesizer publishes a snapshot (the book's
-  // 60 s by default), so a test of snapshot recovery need not wait a minute for one.
+  // Fillscope's fork: two options. How often the snapshot synthesizer publishes a snapshot (the book's
+  // 60 s by default), so a test of snapshot recovery need not wait a minute for one; and a file to
+  // record the matcher's requests in (matcher/request_recording.h), for exchange_replay.
+  const auto usage = [] {
+    std::cerr << "usage: exchange_main [--snapshot-interval-seconds SECONDS] [--record FILE]  (SECONDS > 0; default 60)"
+              << std::endl;
+    return 2;
+  };
   Common::Nanos snapshot_interval = 60 * Common::NANOS_TO_SECS;
-  for (int i = 1; i < argc; ++i) {
-    char *end = nullptr;
-    const double seconds = (i + 1 < argc) ? std::strtod(argv[i + 1], &end) : 0;
-    if (std::strcmp(argv[i], "--snapshot-interval-seconds") != 0 || end == argv[i + 1] || *end != '\0' || !(seconds > 0)) {
-      std::cerr << "usage: exchange_main [--snapshot-interval-seconds SECONDS]  (SECONDS > 0; default 60)" << std::endl;
-      return 2;
+  Exchange::RequestRecorder *recorder = nullptr;  // never destroyed: it is written to until the process ends
+  for (int i = 1; i < argc; i += 2) {
+    if (i + 1 >= argc) {
+      return usage();
     }
-    snapshot_interval = static_cast<Common::Nanos>(seconds * Common::NANOS_TO_SECS);
-    ++i;
+    if (std::strcmp(argv[i], "--snapshot-interval-seconds") == 0) {
+      char *end = nullptr;
+      const double seconds = std::strtod(argv[i + 1], &end);
+      if (end == argv[i + 1] || *end != '\0' || !(seconds > 0)) {
+        return usage();
+      }
+      snapshot_interval = static_cast<Common::Nanos>(seconds * Common::NANOS_TO_SECS);
+    } else if (std::strcmp(argv[i], "--record") == 0 && recorder == nullptr) {
+      recorder = new Exchange::RequestRecorder(argv[i + 1]);
+      if (recorder->error()) {
+        std::cerr << "exchange_main: " << *recorder->error() << std::endl;
+        return 1;
+      }
+    } else {
+      return usage();
+    }
   }
 
   logger = new Common::Logger("exchange_main.log");
@@ -63,6 +82,7 @@ int main(int argc, char **argv) {
 
   logger->log("%:% %() % Starting Matching Engine...\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str));
   matching_engine = new Exchange::MatchingEngine(&client_requests, &client_responses, &market_updates);
+  matching_engine->setRecorder(recorder);
   matching_engine->start();
 
   const std::string mkt_pub_iface = "lo";

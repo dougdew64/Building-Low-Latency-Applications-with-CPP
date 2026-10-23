@@ -9,6 +9,7 @@
 #include "market_data/market_update.h"
 
 #include "me_order_book.h"
+#include "request_recording.h"
 
 namespace Exchange {
   class MatchingEngine final {
@@ -78,6 +79,9 @@ namespace Exchange {
 
           logger_.log("%:% %() % Processing %\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str_),
                       me_client_request->toString());
+          if (recorder_) {  // Fillscope's fork: each request recorded as it is processed (request_recording.h)
+            recorder_->record(*me_client_request);
+          }
           START_MEASURE(Exchange_MatchingEngine_processClientRequest);
           processClientRequest(me_client_request);
           END_MEASURE(Exchange_MatchingEngine_processClientRequest, logger_);
@@ -85,6 +89,10 @@ namespace Exchange {
         }
       }
     }
+
+    /// Fillscope's fork: records each request run() processes, in order, from now on; set before
+    /// start(). Not owned.
+    auto setRecorder(RequestRecorder *recorder) noexcept -> void { recorder_ = recorder; }
 
     /// Deleted default, copy & move constructors and assignment-operators.
     MatchingEngine() = delete;
@@ -110,6 +118,8 @@ namespace Exchange {
     MEMarketUpdateLFQueue *outgoing_md_updates_ = nullptr;
 
     volatile bool run_ = false;
+
+    RequestRecorder *recorder_ = nullptr;
 
     std::string time_str_;
     Logger logger_;
