@@ -6,6 +6,7 @@ namespace Exchange {
   MEOrderBook::MEOrderBook(TickerId ticker_id, Logger *logger, MatchingEngine *matching_engine)
       : ticker_id_(ticker_id), matching_engine_(matching_engine), orders_at_price_pool_(ME_MAX_PRICE_LEVELS), order_pool_(ME_MAX_ORDER_IDS),
         logger_(logger) {
+    ASSERT(cid_oid_to_order_ != nullptr, "Failed to allocate the table of client orders.");
   }
 
   MEOrderBook::~MEOrderBook() {
@@ -14,7 +15,7 @@ namespace Exchange {
 
     matching_engine_ = nullptr;
     bids_by_price_ = asks_by_price_ = nullptr;
-    for (auto &itr: cid_oid_to_order_) {
+    for (auto &itr: *cid_oid_to_order_) {
       itr.fill(nullptr);
     }
   }
@@ -116,10 +117,10 @@ namespace Exchange {
 
   /// Attempt to cancel an order in the order book, issue a cancel-rejection if order does not exist.
   auto MEOrderBook::cancel(ClientId client_id, OrderId order_id, TickerId ticker_id) noexcept -> void {
-    auto is_cancelable = (client_id < cid_oid_to_order_.size());
+    auto is_cancelable = (client_id < cid_oid_to_order_->size());
     MEOrder *exchange_order = nullptr;
     if (LIKELY(is_cancelable)) {
-      auto &co_itr = cid_oid_to_order_.at(client_id);
+      auto &co_itr = cid_oid_to_order_->at(client_id);
       exchange_order = co_itr.at(order_id);
       is_cancelable = (exchange_order != nullptr);
     }

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdlib>
+#include <memory>
+
 #include "common/types.h"
 #include "common/mem_pool.h"
 #include "common/logging.h"
@@ -46,7 +49,17 @@ namespace Exchange {
     MatchingEngine *matching_engine_ = nullptr;
 
     /// Hash map from ClientId -> OrderId -> MEOrder.
-    ClientOrderHashMap cid_oid_to_order_;
+    /// Fillscope's fork: allocated zeroed, by calloc. As a plain member it was never initialized, so
+    /// cancelling an order never sent read a garbage pointer (AddressSanitizer fills new memory with
+    /// 0xbe; outside it, the system's zeroed pages hid this). Value-initializing the member instead
+    /// would write its 2 GB up front; calloc's memory is zero without being touched, a page at a
+    /// time as it is used. calloc creates the array implicitly (it's an implicit-lifetime type), and
+    /// all-zero bits are a null pointer on every platform this builds for.
+    struct FreeDeleter {
+      auto operator()(ClientOrderHashMap *table) const noexcept -> void { std::free(table); }
+    };
+    std::unique_ptr<ClientOrderHashMap, FreeDeleter> cid_oid_to_order_{
+        static_cast<ClientOrderHashMap *>(std::calloc(1, sizeof(ClientOrderHashMap)))};
 
     /// Memory pool to manage MEOrdersAtPrice objects.
     MemPool<MEOrdersAtPrice> orders_at_price_pool_;
@@ -56,7 +69,9 @@ namespace Exchange {
     MEOrdersAtPrice *asks_by_price_ = nullptr;
 
     /// Hash map from Price -> MEOrdersAtPrice.
-    OrdersAtPriceHashMap price_orders_at_price_;
+    /// Fillscope's fork: value-initialized, all null. It was never initialized, and read as empty
+    /// only while the table above made every book a fresh, zeroed mapping of its own.
+    OrdersAtPriceHashMap price_orders_at_price_{};
 
     /// Memory pool to manage MEOrder objects.
     MemPool<MEOrder> order_pool_;
@@ -190,7 +205,7 @@ namespace Exchange {
         order->prev_order_ = order->next_order_ = nullptr;
       }
 
-      cid_oid_to_order_.at(order->client_id_).at(order->client_order_id_) = nullptr;
+      cid_oid_to_order_->at(order->client_id_).at(order->client_order_id_) = nullptr;
       order_pool_.deallocate(order);
     }
 
@@ -212,7 +227,7 @@ namespace Exchange {
         first_order->prev_order_ = order;
       }
 
-      cid_oid_to_order_.at(order->client_id_).at(order->client_order_id_) = order;
+      cid_oid_to_order_->at(order->client_id_).at(order->client_order_id_) = order;
     }
   };
 
