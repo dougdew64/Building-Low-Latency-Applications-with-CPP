@@ -1,3 +1,35 @@
+# This fork: the back end of Fillscope
+
+This is a fork of Packt's repository for Sourav Ghosh's *Building Low Latency Applications with
+C++* (Packt, 2023). Its `fillscope` branch is the back end of
+[Fillscope](https://github.com/dougdew64/fillscope), an observatory that shows what this trading
+system does and explains it from its exact state. `main` follows upstream unchanged.
+
+**What the branch changes** in the code, only in `Chapter12/`, the complete system; the other
+chapters are as upstream has them. (At the top level it adds this section and a `CLAUDE.md`.)
+- `Chapter12/CMakeLists.txt` requires CMake 3.5 rather than 3.0, which CMake 4 no longer accepts.
+  With that, the book's code builds unchanged with GCC 16.2.1 under its own `-Werror`, in both
+  configurations of `scripts/build.sh`.
+
+More changes follow, each listed here, as Fillscope's
+[plan](https://github.com/dougdew64/fillscope/blob/main/docs/PLAN.md) proceeds: tests of what
+Fillscope relies on, then deterministic replay. A bug found in the book's code is fixed here, with
+a test, and listed. The code remains under the original MIT license ([LICENSE](LICENSE)).
+
+**Running it** (from `Chapter12/`): `bash scripts/build.sh` builds both configurations. Then start
+the exchange, `./cmake-build-release/exchange_main &`, wait ten seconds, and start the clients,
+`bash scripts/run_clients.sh &`. To finish, stop the exchange with `pkill -2 exchange_main`; it
+exited about 45 seconds later, and the clients, each by itself, about a minute after that, once
+they had had no market data for 60 seconds (checked 2026-10-23).
+
+`scripts/run_exchange_and_clients.sh`, as published, doesn't finish by itself: it waits for the
+clients before it stops the exchange, while the clients wait for the market to fall silent, which
+it doesn't while the exchange runs. The clients ignore SIGINT, since the scripts start them as
+background jobs of a non-interactive shell.
+
+Upstream's README follows.
+
+---
 
 
 ---
