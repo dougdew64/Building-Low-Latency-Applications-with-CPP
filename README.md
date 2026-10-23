@@ -72,7 +72,7 @@ replay. A bug found in the book's code is fixed here, with a test, and listed. T
 under the original MIT license ([LICENSE](LICENSE)).
 
 **Testing it** (from `Chapter12/`): `cmake -S . -B build -DLOWLATENCY_TESTS=ON && cmake --build build
-&& ctest --test-dir build --output-on-failure`. The tests take about 8 seconds and 3 GB of memory
+&& ctest --test-dir build --output-on-failure`. The tests take about 12 seconds and 4.3 GB of memory
 (the exchange's objects preallocate their pools), and use multicast, looped back to this machine.
 
 **Running it** (from `Chapter12/`): `bash scripts/build.sh` builds both configurations. Then start
