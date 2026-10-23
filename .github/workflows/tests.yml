@@ -1,0 +1,46 @@
+# The fork's tests (Chapter12/tests/), on every push to the fillscope branch and every pull request
+# to it: a normal build, then one with AddressSanitizer and UndefinedBehaviorSanitizer. In Fedora,
+# as Fillscope's CI is, so both use the same GCC.
+name: Tests
+
+on:
+  push:
+    branches: [fillscope]
+  pull_request:
+    branches: [fillscope]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      # fedora:44, pinned by digest, the image Fillscope's CI uses.
+      image: fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
+    defaults:
+      run:
+        working-directory: Chapter12
+    steps:
+      - name: Install the toolchain
+        working-directory: /
+        run: dnf install -y --setopt=install_weak_deps=False gcc-c++ libasan libubsan cmake ninja-build git
+      # Pinned to the commit of a release (named in the comment), not a movable tag.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+      - name: Toolchain versions
+        run: g++ --version | head -1; cmake --version | head -1
+      - name: Tests, normal build
+        run: |
+          cmake -S . -B build/normal -G Ninja -DCMAKE_BUILD_TYPE=Debug -DLOWLATENCY_TESTS=ON
+          cmake --build build/normal
+          ctest --test-dir build/normal --output-on-failure
+      # The book's build file sets CMAKE_CXX_FLAGS itself, so the sanitizers go in the flags it
+      # adds to them for a Debug build, and in the linker's.
+      - name: Tests, sanitizer build
+        run: |
+          cmake -S . -B build/asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DLOWLATENCY_TESTS=ON \
+                -DCMAKE_CXX_FLAGS_DEBUG="-g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer" \
+                -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build/asan
+          ctest --test-dir build/asan --output-on-failure

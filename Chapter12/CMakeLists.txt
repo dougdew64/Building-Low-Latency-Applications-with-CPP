@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 3.10)
 project(LowLatencyApp)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_COMPILER g++)
 set(CMAKE_CXX_FLAGS "-std=c++2a -Wall -Wextra -Werror -Wpedantic")
 set(CMAKE_VERBOSE_MAKEFILE on)
 
@@ -35,3 +34,11 @@ target_link_libraries(release_benchmark PUBLIC ${LIBS})
 
 add_executable(hash_benchmark benchmarks/hash_benchmark.cpp)
 target_link_libraries(hash_benchmark PUBLIC ${LIBS})
+
+# The fork's tests (tests/): what Fillscope relies on, and every change made here. Off by default,
+# so the book's own build is unchanged.
+option(LOWLATENCY_TESTS "Build the tests in tests/" OFF)
+if(LOWLATENCY_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()

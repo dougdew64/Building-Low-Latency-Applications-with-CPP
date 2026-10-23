@@ -26,7 +26,7 @@ namespace Exchange {
   }
 
   /// Process an incremental market update and update the limit order book snapshot.
-  auto SnapshotSynthesizer::addToSnapshot(const MDPMarketUpdate *market_update) {
+  auto SnapshotSynthesizer::addToSnapshot(const MDPMarketUpdate *market_update) -> void {
     const auto &me_market_update = market_update->me_market_update_;
     auto *orders = &ticker_orders_.at(me_market_update.ticker_id_);
     switch (me_market_update.type_) {
@@ -69,7 +69,7 @@ namespace Exchange {
   }
 
   /// Publish a full snapshot cycle on the snapshot multicast stream.
-  auto SnapshotSynthesizer::publishSnapshot() {
+  auto SnapshotSynthesizer::publishSnapshot() -> void {
     size_t snapshot_size = 0;
 
     // The snapshot cycle starts with a SNAPSHOT_START message and order_id_ contains the last sequence number from the incremental market data stream used to build this snapshot.
