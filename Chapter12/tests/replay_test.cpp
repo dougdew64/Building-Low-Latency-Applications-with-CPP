@@ -17,7 +17,6 @@
 #include "matcher/request_recording.h"
 #include "test_support.h"
 
-#include <spawn.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -140,8 +139,7 @@ TEST(RequestRecording, AFailedWriteStopsTheRecordingAndSaysWhy) {
 // recording that ends with one can't be read, so it is cut back to the last whole request. A limit
 // on the file's size (RLIMIT_FSIZE) makes the write stop part-way: the third request's write gets
 // 10 of its bytes in, and its next write fails (EFBIG). The limit would stop this program's other
-// files too, so the recorder runs in a child: this program again, started with posix_spawn, since
-// fork() can fail here (the exchange's objects map gigabytes, and the sanitizer build refuses it).
+// files too, so the recorder runs in a child (runInChild).
 TEST(RequestRecording, AWriteCutOffPartWayLeavesTheWholeRequestsBefore) {
   if (const char *path = std::getenv("LOWLATENCY_CUT_OFF_RECORDING")) {
     const rlimit limit{8 + 2 * sizeof(MEClientRequest) + 10, RLIM_INFINITY};
@@ -158,23 +156,9 @@ TEST(RequestRecording, AWriteCutOffPartWayLeavesTheWholeRequestsBefore) {
     ::_exit(said ? 0 : 3);
   }
   const auto path = (std::filesystem::current_path() / "cut-off.rec").string();
-  std::string program(4096, '\0');
-  const auto length = ::readlink("/proc/self/exe", program.data(), program.size());
-  ASSERT_GT(length, 0);
-  program.resize(static_cast<size_t>(length));
-  std::string filter = "--gtest_filter=RequestRecording.AWriteCutOffPartWayLeavesTheWholeRequestsBefore";
-  char *const argv[] = {program.data(), filter.data(), nullptr};
-  std::vector<char *> env;
-  for (char **variable = environ; *variable != nullptr; ++variable) {
-    env.push_back(*variable);
-  }
-  std::string marker = "LOWLATENCY_CUT_OFF_RECORDING=" + path;
-  env.push_back(marker.data());
-  env.push_back(nullptr);
-  pid_t child = 0;
-  ASSERT_EQ(::posix_spawn(&child, program.c_str(), nullptr, nullptr, argv, env.data()), 0);
-  int status = 0;
-  ASSERT_EQ(::waitpid(child, &status, 0), child);
+  const int status = LowLatencyTests::runInChild("RequestRecording.AWriteCutOffPartWayLeavesTheWholeRequestsBefore",
+                                                 "LOWLATENCY_CUT_OFF_RECORDING=" + path);
+  ASSERT_NE(status, -1) << "the child couldn't be started";
   ASSERT_TRUE(WIFEXITED(status));
   EXPECT_EQ(WEXITSTATUS(status), 0) << "2: setrlimit failed; 3: the recorder didn't say it stopped after 2 requests";
 

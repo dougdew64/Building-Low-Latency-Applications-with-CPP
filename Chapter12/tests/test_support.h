@@ -2,6 +2,7 @@
 
 // What the tests share: one matching engine, the queues it writes to, and taking what it wrote.
 
+#include <string>
 #include <vector>
 
 #include "matcher/matching_engine.h"
@@ -21,4 +22,11 @@ namespace LowLatencyTests {
   // Everything the engine has written since the last call, in order, removed from its queues.
   auto takeResponses() -> std::vector<Exchange::MEClientResponse>;
   auto takeUpdates() -> std::vector<Exchange::MEMarketUpdate>;
+
+  // Runs one test of this program again in a child, with `marker` ("NAME=VALUE") added to its
+  // environment, and returns its wait status, or -1 if it couldn't be started. A test that needs a
+  // process of its own (to set a limit on it, or to see it exit) is the child when its marker is
+  // set. The child is started with posix_spawn, since fork() can fail here: the exchange's objects
+  // map gigabytes, and the sanitizer build refuses it.
+  auto runInChild(const std::string &test, const std::string &marker) -> int;
 }

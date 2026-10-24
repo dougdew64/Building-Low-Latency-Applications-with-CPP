@@ -24,7 +24,7 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   cancels); the incremental feed's sequence numbers; a snapshot's content; `PriceLevelTable`;
   recording requests, the running matcher's recording, and replaying them; the lockstep anchor's
   tracer check; the order server refusing requests the matcher can't process, and the trading
-  client's handling of a refusal. To call the snapshot
+  client's handling of a refusal; the lock-free queue's order and its stop when full. To call the snapshot
   synthesizer from them, `addToSnapshot()` and `publishSnapshot()` now declare their return type
   (`-> void`), which they deduced, so no other file could call them.
 - **An option for tests:** `exchange_main --snapshot-interval-seconds SECONDS` sets how often the
@@ -79,6 +79,14 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     found by their exact price, in `PriceLevelTable` (`exchange/matcher/price_level_table.h`): a
     hash table in a fixed array, so it allocates nothing, with linear probing and backward-shift
     deletion, tested against `std::map` through random inserts and removals.
+  - A full lock-free queue (`common/lf_queue.h`) overwrote the oldest message its reader hadn't
+    read yet, silently: a reader 262,144 messages behind, such as a stalled market data publisher,
+    lost them, and since the publisher numbers updates as it sends them, a lost update left no gap
+    in the sequence numbers. A write to a full queue now stops the program ("LFQueue full";
+    Fillscope's owner chose this, 2026-10-24, over making the writer wait, which would change the
+    latency the book measures and can hang the order server and the matcher on each other's full
+    queues). The loggers' queues are the same queue, so a logger 8,388,608 values behind (each
+    character of a message is one, and each number) stops the program too.
 
 **Known issues,** not fixed (yet):
 - **A book holds at most 255 price levels at once.** Its pool of levels has 256 blocks, and taking
@@ -103,9 +111,6 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   further order rejected. Raising the limit means a table not indexed by the id.
 - **A new order that reuses a live order's id** overwrites its slot, and the older order can no
   longer be cancelled. The order server can't see it: whether an id is live is the matcher's.
-- **A full queue is overwritten.** The lock-free queues (`common/lf_queue.h`) never check that
-  there is room: a reader 256K entries behind, such as a stalled market data publisher, has unread
-  entries overwritten, silently.
 - **A backlog of market data can be lost whole.** The publisher sends everything queued in one
   datagram, and `McastSocket::sendAndRecv()` only logs a failed `send()`: more than about 1,559
   updates (65,507 bytes) at once fail with `EMSGSIZE`, and a listener sees a gap.
