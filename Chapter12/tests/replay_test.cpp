@@ -3,16 +3,21 @@
 // checked by Fillscope's system test, which runs the exchange; these check the parts.
 #include <gtest/gtest.h>
 
+#include <csignal>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "matcher/replay.h"
 #include "matcher/request_recording.h"
 #include "test_support.h"
+
+#include <unistd.h>
 
 using namespace Exchange;
 using Common::Side;
@@ -73,6 +78,99 @@ TEST(RequestRecording, SaysWhyARecordingCantBeRead) {
   EXPECT_TRUE(RequestRecorder{"no-such-directory/x.rec"}.error());
 }
 
+// The matcher indexes its tables by a request's fields unchecked, so a recording holding one it
+// can't process is refused when read, naming the request and why.
+TEST(RequestRecording, RefusesARequestTheMatcherCantProcess) {
+  const auto refused = [](MEClientRequest bad) {
+    {
+      RequestRecorder recorder{"bad.rec"};
+      recorder.record(kRequests[0]);
+      recorder.record(bad);
+    }
+    const auto recording = readRecording("bad.rec");
+    EXPECT_TRUE(recording.requests.empty());
+    return recording.error.value_or("");
+  };
+  auto bad = kRequests[0];
+  bad.ticker_id_ = Common::ME_MAX_TICKERS;
+  EXPECT_NE(refused(bad).find("request 2 of bad.rec can't be processed: its ticker is 8, and the exchange has 8"), std::string::npos)
+      << refused(bad);
+  bad = kRequests[0];
+  bad.client_id_ = Common::ME_MAX_NUM_CLIENTS;
+  EXPECT_NE(refused(bad).find("its client is 256"), std::string::npos);
+  bad = kRequests[0];
+  bad.order_id_ = Common::ME_MAX_ORDER_IDS;
+  EXPECT_NE(refused(bad).find("its order id is 1048576"), std::string::npos);
+  bad = kRequests[0];
+  bad.type_ = ClientRequestType::INVALID;
+  EXPECT_NE(refused(bad).find("its type is 0"), std::string::npos);
+  bad = kRequests[0];
+  bad.side_ = Side::INVALID;
+  EXPECT_NE(refused(bad).find("a new order with side 0"), std::string::npos);
+  // A cancel names no side, which is fine: ReadsBackWhatWasRecordedInOrder's last request is one.
+}
+
+// A write that fails stops the recording there, and says so. The recording is a pipe here: the
+// first request goes through, then its reader is closed, so the next write fails (EPIPE).
+TEST(RequestRecording, AFailedWriteStopsTheRecordingAndSaysWhy) {
+  int pipe_ends[2];
+  ASSERT_EQ(::pipe(pipe_ends), 0);
+  const auto previous = std::signal(SIGPIPE, SIG_IGN);  // the write then fails rather than ending the tests
+  {
+    RequestRecorder recorder{"/proc/self/fd/" + std::to_string(pipe_ends[1])};
+    ASSERT_FALSE(recorder.error()) << *recorder.error();
+    recorder.record(kRequests[0]);
+    std::string arrived(8 + sizeof(MEClientRequest), '\0');
+    ASSERT_EQ(::read(pipe_ends[0], arrived.data(), arrived.size()), static_cast<ssize_t>(arrived.size()));
+    EXPECT_EQ(arrived.substr(0, 8), "LLREQ001");
+    ::close(pipe_ends[0]);
+    recorder.record(kRequests[1]);
+    recorder.record(kRequests[2]);
+    ASSERT_TRUE(recorder.error());
+    EXPECT_NE(recorder.error()->find("stops after 1 requests"), std::string::npos) << *recorder.error();
+  }
+  std::signal(SIGPIPE, previous);
+  ::close(pipe_ends[1]);
+}
+
+// An empty recording, just its header (as one is before the exchange's first request), reads as no
+// requests.
+TEST(RequestRecording, AnEmptyRecordingHasNoRequests) {
+  { RequestRecorder recorder{"empty.rec"}; }
+  const auto recording = readRecording("empty.rec");
+  ASSERT_FALSE(recording.error) << *recording.error;
+  EXPECT_TRUE(recording.requests.empty());
+}
+
+// The matcher's own loop records each request it processes, in order (exchange_main --record).
+TEST(RequestRecording, TheRunningMatcherRecordsWhatItProcesses) {
+  // A fresh engine with a recorder, both never destroyed: the engine's thread runs on (its threads
+  // are never joined, a known issue) and destroying an engine sleeps for a second.
+  static auto *const updates = new MEMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
+  static auto *const responses = new ClientResponseLFQueue(Common::ME_MAX_CLIENT_UPDATES);
+  static auto *const requests = new ClientRequestLFQueue(Common::ME_MAX_CLIENT_UPDATES);
+  static auto *const engine = new MatchingEngine(requests, responses, updates);
+  static auto *const recorder = new RequestRecorder("engine.rec");
+  ASSERT_FALSE(recorder->error()) << *recorder->error();
+  engine->setRecorder(recorder);
+  engine->start();
+  for (const auto &r : kRequests) {
+    *requests->getNextToWriteTo() = r;
+    requests->updateWriteIndex();
+  }
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+  while (readRecording("engine.rec").requests.size() < kRequests.size() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds{10});
+  }
+  engine->stop();
+  const auto recording = readRecording("engine.rec");
+  ASSERT_FALSE(recording.error) << *recording.error;
+  ASSERT_EQ(recording.requests.size(), kRequests.size());
+  for (size_t i = 0; i < kRequests.size(); ++i) {
+    EXPECT_EQ(fields(recording.requests[i]), fields(kRequests[i])) << "request " << i;
+  }
+}
+
 TEST(Replay, GivesTheMarketUpdatesTheRequestsMakeNumberedFromOne) {
   // A fresh engine, as a replay needs. Never destroyed, as the shared one (test_support.h).
   static auto *const updates = new MEMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
@@ -114,4 +212,8 @@ TEST(Replay, TheMarketDataFileIsAHeaderThenTheUpdatesBytes) {
   EXPECT_EQ(bytes.substr(12, 10), "runs/a.rec");
   EXPECT_EQ(std::memcmp(bytes.data() + 22, updates.data(), 2 * sizeof(MDPMarketUpdate)), 0);
   EXPECT_TRUE(writeMarketData("no-such-directory/m.dat", "a.rec", updates));
+  // Opened, but every write fails (ENOSPC): reported, not taken for a written file.
+  const auto full = writeMarketData("/dev/full", "a.rec", updates);
+  ASSERT_TRUE(full);
+  EXPECT_NE(full->find("can't write /dev/full"), std::string::npos) << *full;
 }

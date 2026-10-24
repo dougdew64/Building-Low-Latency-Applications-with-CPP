@@ -4,15 +4,20 @@
 //   exchange_replay RECORDING [MARKET_DATA_FILE] [--publish GROUP:PORT] [--self-stop] [--interval-ms MS]
 //
 // MARKET_DATA_FILE: write the market data the replay publishes to this file.
-// --publish: after each request, send its market updates on this multicast group, as the exchange's
-//   publisher would, then call the lockstep anchor (matcher/lockstep_anchor.h): so a debugger stopped
-//   there finds a viewer listening to the group already showing the books after that request.
-//   Start the viewer first: a replay publishes no snapshots for a late one to recover from.
+// After each request the replay calls the lockstep anchor (matcher/lockstep_anchor.h), where a
+// debugger stops.
+// --publish GROUP:PORT: first send that request's market updates on this multicast group (an IPv4
+//   address), as the exchange's publisher would: so a debugger stopped in the anchor finds a viewer
+//   listening to the group already showing the books after that request. Start the viewer first: a
+//   replay publishes no snapshots for a late one to recover from.
 // --self-stop: under a debugger, stop in the anchor after each request, with no breakpoint set.
-// --interval-ms: wait this long after each request, to watch it run without a debugger.
+// --interval-ms MS: wait this long (up to an hour) after each request, to watch it run without a
+//   debugger.
 //
 // One of MARKET_DATA_FILE and --publish is needed.
 
+#include <arpa/inet.h>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +36,19 @@
 namespace {
   constexpr const char *kUsage =
       "usage: exchange_replay RECORDING [MARKET_DATA_FILE] [--publish GROUP:PORT] [--self-stop] [--interval-ms MS]";
+
+  /// A whole number from 0 to `max`, all of `text` digits (no sign, no spaces, not empty).
+  auto parseNumber(const std::string &text, long max) -> std::optional<long> {
+    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) {
+      return std::nullopt;
+    }
+    errno = 0;
+    const long value = std::strtol(text.c_str(), nullptr, 10);
+    if (errno == ERANGE || value > max) {
+      return std::nullopt;
+    }
+    return value;
+  }
 
   struct Options {
     std::string recording;
@@ -52,19 +70,22 @@ namespace {
       } else if (arg == "--publish" && i + 1 < argc) {
         const std::string value = argv[++i];
         const auto colon = value.rfind(':');
-        char *end = nullptr;
-        const long port = colon == std::string::npos ? 0 : std::strtol(value.c_str() + colon + 1, &end, 10);
-        if (colon == std::string::npos || colon == 0 || *end != '\0' || port <= 0 || port > 65535) {
+        if (colon == std::string::npos) {
+          return std::nullopt;
+        }
+        const auto port = parseNumber(value.substr(colon + 1), 65535);
+        in_addr group{};
+        if (!port || *port == 0 || ::inet_pton(AF_INET, value.substr(0, colon).c_str(), &group) != 1) {
           return std::nullopt;
         }
         options.group = value.substr(0, colon);
-        options.port = static_cast<int>(port);
+        options.port = static_cast<int>(*port);
       } else if (arg == "--interval-ms" && i + 1 < argc) {
-        char *end = nullptr;
-        options.interval_ms = std::strtol(argv[++i], &end, 10);
-        if (*end != '\0' || options.interval_ms < 0) {
+        const auto interval = parseNumber(argv[++i], 3'600'000);  // up to an hour
+        if (!interval) {
           return std::nullopt;
         }
+        options.interval_ms = *interval;
       } else if (!arg.starts_with("--") && positionals < 2) {
         positional[positionals++] = arg;
       } else {

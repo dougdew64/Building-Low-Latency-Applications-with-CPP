@@ -3,7 +3,18 @@
 // it is tested by Fillscope's replay_debugger_tests, which run exchange_replay.
 #include <gtest/gtest.h>
 
+#include <cstdlib>
+#include <string>
+#include <vector>
+
 #include "matcher/lockstep_anchor.h"
+
+#include <spawn.h>
+#include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern char **environ;
 
 using namespace Exchange;
 
@@ -16,10 +27,37 @@ TEST(LockstepAnchor, ReadsTracerPidOnlyFromTheStartOfALine) {
   EXPECT_FALSE(tracerAttached("TracerPid:\t12abc\n"));
 }
 
+// Run untraced, it says so. Then this test runs again in a child, which asks this process to trace
+// it (PTRACE_TRACEME): traced, the child says so in its exit status. The child is this program
+// again, started with posix_spawn rather than fork, which can fail here: the exchange's objects map
+// gigabytes, and in the sanitizer build fork() is refused (ENOMEM).
 TEST(LockstepAnchor, KnowsWhetherThisProcessIsTraced) {
-  // The tests run untraced (under a debugger this would say so, and that is right too).
-  const auto traced = tracerAttachedNow();
-  ASSERT_TRUE(traced.has_value());
+  if (std::getenv("LOWLATENCY_TRACED_CHILD") != nullptr) {
+    if (::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) != 0) {
+      ::_exit(2);
+    }
+    ::_exit(tracerAttachedNow() == true ? 0 : 3);
+  }
+  EXPECT_EQ(tracerAttachedNow(), false) << "run without a debugger";
+  std::string program(4096, '\0');
+  const auto length = ::readlink("/proc/self/exe", program.data(), program.size());
+  ASSERT_GT(length, 0);
+  program.resize(static_cast<size_t>(length));
+  std::string filter = "--gtest_filter=LockstepAnchor.KnowsWhetherThisProcessIsTraced";
+  char *const argv[] = {program.data(), filter.data(), nullptr};
+  std::vector<char *> env;
+  for (char **variable = environ; *variable != nullptr; ++variable) {
+    env.push_back(*variable);
+  }
+  std::string marker = "LOWLATENCY_TRACED_CHILD=1";
+  env.push_back(marker.data());
+  env.push_back(nullptr);
+  pid_t child = 0;
+  ASSERT_EQ(::posix_spawn(&child, program.c_str(), nullptr, nullptr, argv, env.data()), 0);
+  int status = 0;
+  ASSERT_EQ(::waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0) << "2: PTRACE_TRACEME failed; 3: traced, and said it wasn't";
 }
 
 TEST(LockstepAnchor, RecordsEachRequest) {

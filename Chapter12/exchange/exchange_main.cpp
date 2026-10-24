@@ -39,12 +39,13 @@ int main(int argc, char **argv) {
   // 60 s by default), so a test of snapshot recovery need not wait a minute for one; and a file to
   // record the matcher's requests in (matcher/request_recording.h), for exchange_replay.
   const auto usage = [] {
-    std::cerr << "usage: exchange_main [--snapshot-interval-seconds SECONDS] [--record FILE]  (SECONDS > 0; default 60)"
+    std::cerr << "usage: exchange_main [--snapshot-interval-seconds SECONDS] [--record FILE]  (SECONDS from 0.001 to "
+                 "1000000; default 60)"
               << std::endl;
     return 2;
   };
   Common::Nanos snapshot_interval = 60 * Common::NANOS_TO_SECS;
-  Exchange::RequestRecorder *recorder = nullptr;  // never destroyed: it is written to until the process ends
+  const char *record_path = nullptr;
   for (int i = 1; i < argc; i += 2) {
     if (i + 1 >= argc) {
       return usage();
@@ -52,18 +53,25 @@ int main(int argc, char **argv) {
     if (std::strcmp(argv[i], "--snapshot-interval-seconds") == 0) {
       char *end = nullptr;
       const double seconds = std::strtod(argv[i + 1], &end);
-      if (end == argv[i + 1] || *end != '\0' || !(seconds > 0)) {
+      // Bounded, so the nanoseconds fit in an int64 (inf or 1e10 would overflow it, undefined
+      // behaviour) and aren't 0, which would send a snapshot on every pass of the synthesizer.
+      if (end == argv[i + 1] || *end != '\0' || !(seconds >= 0.001 && seconds <= 1e6)) {
         return usage();
       }
       snapshot_interval = static_cast<Common::Nanos>(seconds * Common::NANOS_TO_SECS);
-    } else if (std::strcmp(argv[i], "--record") == 0 && recorder == nullptr) {
-      recorder = new Exchange::RequestRecorder(argv[i + 1]);
-      if (recorder->error()) {
-        std::cerr << "exchange_main: " << *recorder->error() << std::endl;
-        return 1;
-      }
+    } else if (std::strcmp(argv[i], "--record") == 0 && record_path == nullptr) {
+      record_path = argv[i + 1];
     } else {
       return usage();
+    }
+  }
+  // Opened once the whole command line has been read, so a bad one leaves the file as it was.
+  Exchange::RequestRecorder *recorder = nullptr;  // never destroyed: it is written to until the process ends
+  if (record_path) {
+    recorder = new Exchange::RequestRecorder(record_path);
+    if (recorder->error()) {
+      std::cerr << "exchange_main: " << *recorder->error() << std::endl;
+      return 1;
     }
   }
 

@@ -1,5 +1,9 @@
 # This fork: the back end of Fillscope
 
+**Purpose:** what this fork changes in the book's code, why, its known issues, and how to test and
+run it. **Status:** reference; each change is listed here as it lands. **Read when:** using or
+changing the fork, or before relying on the book's code as published.
+
 This is a fork of Packt's repository for Sourav Ghosh's *Building Low Latency Applications with
 C++* (Packt, 2023). Its `fillscope` branch is the back end of
 [Fillscope](https://github.com/dougdew64/fillscope), an observatory that shows what this trading
@@ -17,11 +21,13 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   book's own build is unchanged) and run by `ctest` and by this fork's CI, normally and under
   AddressSanitizer and UndefinedBehaviorSanitizer: the market data's layout on the wire; the
   matching (price-time priority, partial fills, sweeps across price levels, cancels and rejected
-  cancels); the incremental feed's sequence numbers; a snapshot's content. To call the snapshot
+  cancels); the incremental feed's sequence numbers; a snapshot's content; `PriceLevelTable`;
+  recording requests, the running matcher's recording, and replaying them; the lockstep anchor's
+  tracer check. To call the snapshot
   synthesizer from them, `addToSnapshot()` and `publishSnapshot()` now declare their return type
   (`-> void`), which they deduced, so no other file could call them.
 - **An option for tests:** `exchange_main --snapshot-interval-seconds SECONDS` sets how often the
-  exchange publishes a snapshot (the book's 60 s by default), so a test of recovering from a
+  exchange publishes a snapshot (the book's 60 s by default; from 0.001 to 1,000,000), so a test of recovering from a
   snapshot need not wait a minute; the snapshot synthesizer and the market data publisher take it
   as a constructor argument with that default. Without arguments the exchange runs as before.
 - **Deterministic replay:** `exchange_main --record FILE` records the requests the matching engine
@@ -30,7 +36,10 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   with no clients and no network, and writes the incremental market updates it publishes
   (`exchange/matcher/replay.h`). The matcher is single-threaded and reads no clock, so a recording
   replays to the very updates the live exchange published, byte for byte: Fillscope's system test
-  checks it against a live run.
+  checks it against a live run. A recording is opened only once the whole command line has been
+  read; if a write to it fails, it stops there and the exchange says so on stderr. Reading one
+  refuses a request the matcher can't process (a ticker, client or order id past its tables, an
+  unknown type or a new order's unknown side), naming it.
 - **Debugger lockstep on a replay:** `exchange_replay RECORDING --publish GROUP:PORT` sends each
   request's market updates on that multicast group, as the exchange's publisher would, then calls
   a lockstep anchor, `fillscope_request_anchor(request_number, updates_published)`
@@ -74,17 +83,30 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   machine, which join on the default interface too (checked 2026-10-23: `ip route get 233.252.14.3`
   names the Wi-Fi interface). Fixing it means choosing the interface in the publisher and in every
   listener, the clients and Fillscope's viewer alike.
+- **The matcher trusts every request.** It indexes its tables by a request's ticker, client and
+  order ids unchecked: a ticker of 8 or more is undefined behaviour, and a client id of 256 or more
+  or an order id of 1,048,576 or more throws inside a `noexcept` function, ending the exchange. The
+  trading client numbers its orders from 1 up and never reuses one, so a long enough run ends the
+  exchange by itself. A new order that reuses a live order's id overwrites its slot, and the older
+  order can no longer be cancelled. (A recording is checked when read; live requests aren't.)
+- **A full queue is overwritten.** The lock-free queues (`common/lf_queue.h`) never check that
+  there is room: a reader 256K entries behind, such as a stalled market data publisher, has unread
+  entries overwritten, silently.
+- **A backlog of market data can be lost whole.** The publisher sends everything queued in one
+  datagram, and `McastSocket::sendAndRecv()` only logs a failed `send()`: more than about 1,559
+  updates (65,507 bytes) at once fail with `EMSGSIZE`, and a listener sees a gap.
+- **A recording that can't be written ends, and the exchange runs on.** It says so on stderr; the
+  run then has no complete recording to replay.
 - **`createSocket()` doesn't check `connect()`:** it compares the result with 1, which `connect()`
   never returns. (Comparing with -1 would fail the non-blocking connect it makes, which reports
   "in progress" as -1.)
 
 More changes follow, each listed here, as Fillscope's
-[plan](https://github.com/dougdew64/fillscope/blob/main/docs/PLAN.md) proceeds, next deterministic
-replay. A bug found in the book's code is fixed here, with a test, and listed. The code remains
+[plan](https://github.com/dougdew64/fillscope/blob/main/docs/PLAN.md) proceeds. A bug found in the book's code is fixed here, with a test, and listed. The code remains
 under the original MIT license ([LICENSE](LICENSE)).
 
 **Testing it** (from `Chapter12/`): `cmake -S . -B build -DLOWLATENCY_TESTS=ON && cmake --build build
-&& ctest --test-dir build --output-on-failure`. The tests take about 12 seconds and 4.3 GB of memory
+&& ctest --test-dir build --output-on-failure`. The tests take about 14 seconds and 4.3 GB of memory
 (the exchange's objects preallocate their pools), and use multicast, looped back to this machine.
 
 **Running it** (from `Chapter12/`): `bash scripts/build.sh` builds both configurations. Then start

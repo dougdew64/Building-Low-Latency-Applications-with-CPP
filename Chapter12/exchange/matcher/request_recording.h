@@ -27,18 +27,20 @@ namespace Exchange {
     RequestRecorder &operator=(const RequestRecorder &) = delete;
 
     /// Appends one request. Each is written as it comes, with write(2), so a recording is whole up to
-    /// its last request even if the exchange is killed.
+    /// its last request even if the exchange is killed. If a write fails, the recording stops there,
+    /// error() says why, and so does a line on stderr.
     auto record(const MEClientRequest &request) noexcept -> void;
 
     auto error() const -> const std::optional<std::string> & { return error_; }
 
   private:
     int fd_ = -1;
+    size_t recorded_ = 0;
     std::optional<std::string> error_;
   };
 
   /// The requests in a recording, in order; or why it can't be read (no file, not a recording, a
-  /// partial last request).
+  /// partial last request, or a request the matcher can't process).
   struct Recording {
     std::vector<MEClientRequest> requests;
     std::optional<std::string> error;
