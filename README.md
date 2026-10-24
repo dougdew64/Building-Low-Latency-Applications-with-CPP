@@ -24,7 +24,9 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   cancels); the incremental feed's sequence numbers; a snapshot's content; `PriceLevelTable`;
   recording requests, the running matcher's recording, and replaying them; the lockstep anchor's
   tracer check; the order server refusing requests the matcher can't process, and the trading
-  client's handling of a refusal; the lock-free queue's order and its stop when full. To call the snapshot
+  client's handling of a refusal; the lock-free queue's order and its stop when full; and, in a program of their own
+  (`lowlatency_allocation_tests`), that the queues, the pools, the price levels and the snapshot's
+  updates allocate nothing. To call the snapshot
   synthesizer from them, `addToSnapshot()` and `publishSnapshot()` now declare their return type
   (`-> void`), which they deduced, so no other file could call them.
 - **An option for tests:** `exchange_main --snapshot-interval-seconds SECONDS` sets how often the
@@ -79,6 +81,13 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     found by their exact price, in `PriceLevelTable` (`exchange/matcher/price_level_table.h`): a
     hash table in a fixed array, so it allocates nothing, with linear probing and backward-shift
     deletion, tested against `std::map` through random inserts and removals.
+  - `ASSERT` (`common/macros.h`) was a function taking a `std::string`, so every call built its
+    message, even when the check held, and a message longer than a string's own buffer (15
+    characters) allocated: on every message read from a queue, every allocation and release from a
+    memory pool, and every update the snapshot synthesizer applies, in code whose pools exist so
+    that trading never allocates. It is now a macro that evaluates its message only when the check
+    fails. `lowlatency_allocation_tests`, a program of its own that counts every `operator new`,
+    checks that these allocate nothing.
   - A full lock-free queue (`common/lf_queue.h`) overwrote the oldest message its reader hadn't
     read yet, silently: a reader 262,144 messages behind, such as a stalled market data publisher,
     lost them, and since the publisher numbers updates as it sends them, a lost update left no gap

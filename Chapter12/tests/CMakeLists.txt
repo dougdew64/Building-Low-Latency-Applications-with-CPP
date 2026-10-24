@@ -15,6 +15,10 @@ add_executable(lowlatency_tests
   market_data_test.cpp replay_test.cpp lockstep_anchor_test.cpp order_server_test.cpp lf_queue_test.cpp)
 target_link_libraries(lowlatency_tests PRIVATE libexchange libtrading libcommon pthread GTest::gtest)
 
+# What must not allocate, in a program of its own: it replaces operator new with one that counts.
+add_executable(lowlatency_allocation_tests test_main.cpp allocation_test.cpp)
+target_link_libraries(lowlatency_allocation_tests PRIVATE libexchange libcommon pthread GTest::gtest)
+
 # One CTest test runs the whole program. The tests share one matching engine, which takes two
 # seconds to make (the book's createAndStartThread sleeps a second after starting each thread, and
 # it has two), and the exchange's objects preallocate hundreds of megabytes; a process per test
@@ -23,4 +27,5 @@ target_link_libraries(lowlatency_tests PRIVATE libexchange libtrading libcommon 
 # tests/backend/CMakeLists.txt), with its tiers and timeouts.
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   add_test(NAME lowlatency_tests COMMAND lowlatency_tests)
+  add_test(NAME lowlatency_allocation_tests COMMAND lowlatency_allocation_tests)
 endif()

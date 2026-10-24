@@ -17,9 +17,7 @@ namespace Common {
     /// A full queue stops the program: writing on would overwrite the oldest unread element. Only the
     /// reader changes the count meanwhile, and only downward, so a queue not full stays not full.
     auto getNextToWriteTo() noexcept {
-      if (UNLIKELY(num_elements_ == store_.size())) {
-        FATAL("LFQueue full: the reader is " + std::to_string(store_.size()) + " elements behind");
-      }
+      ASSERT(num_elements_ != store_.size(), "LFQueue full: the reader is " + std::to_string(store_.size()) + " elements behind");
       return &store_[next_write_index_];
     }
 
