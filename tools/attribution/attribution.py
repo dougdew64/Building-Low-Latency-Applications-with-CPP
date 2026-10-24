@@ -99,30 +99,48 @@ def text_file_lines(root, commit):
     return files
 
 
-def blame_counts(root, commit, path, coauthored):
-    """(owner's lines, co-authored lines) in `path` at `commit`. Whitespace-only changes (-w) don't
-    take a line from its author, nor does moving or copying it from another file (-M -C)."""
-    owner = coauthor = 0
+def blamed_commits(root, commit, path):
+    """The commit each line of `path` at `commit` is credited to, line by line. Whitespace-only
+    changes (-w) don't take a line from its author, nor does moving or copying it from another file
+    (-M -C)."""
     for line in git(root, "blame", "--porcelain", "-w", "-M", "-C", commit, "--", path).splitlines():
         match = BLAME_LINE.match(line)
         if match:
-            if match.group(1) in coauthored:
-                coauthor += 1
-            else:
-                owner += 1
+            yield match.group(1)
+
+
+def blame_counts(root, commit, path, coauthored):
+    """(owner's lines, co-authored lines) in `path` at `commit`."""
+    owner = coauthor = 0
+    for sha in blamed_commits(root, commit, path):
+        if sha in coauthored:
+            coauthor += 1
+        else:
+            owner += 1
     return owner, coauthor
 
 
 def blame_counts_with_upstream(root, commit, path, coauthored, upstream):
-    """(upstream lines, owner's lines, co-authored lines) in `path` at `commit`, counted as
-    blame_counts counts; a line whose commit is in `upstream` is upstream's."""
+    """(upstream lines, owner's lines, co-authored lines) in `path` at `commit`; a line whose commit
+    is in `upstream` is upstream's."""
     counts = [0, 0, 0]
-    for line in git(root, "blame", "--porcelain", "-w", "-M", "-C", commit, "--", path).splitlines():
-        match = BLAME_LINE.match(line)
-        if match:
-            sha = match.group(1)
-            counts[0 if sha in upstream else 2 if sha in coauthored else 1] += 1
+    for sha in blamed_commits(root, commit, path):
+        counts[0 if sha in upstream else 2 if sha in coauthored else 1] += 1
     return tuple(counts)
+
+
+def counted_files(root, commit, report_path):
+    """(the files whose lines are counted, each with its number of lines; the files nobody wrote):
+    every text file at `commit` but the report itself and those in NOT_WRITTEN."""
+    counted, not_written = {}, []
+    for path, lines in sorted(text_file_lines(root, commit).items()):
+        if path == report_path:
+            continue
+        if path in NOT_WRITTEN:
+            not_written.append(path)
+            continue
+        counted[path] = lines
+    return counted, not_written
 
 
 def share(part, whole):
@@ -138,13 +156,8 @@ def report(root, rev, report_path=REPORT, upstream=None):
     coauthored = coauthored_commits(root, commit)
     rows = []
     totals = {"code": [0, 0], "documents": [0, 0]}
-    not_written = []
-    for path in text_files(root, commit):
-        if path == report_path:
-            continue
-        if path in NOT_WRITTEN:
-            not_written.append(path)
-            continue
+    counted, not_written = counted_files(root, commit, report_path)
+    for path in counted:
         owner, coauthor = blame_counts(root, commit, path, coauthored)
         kind = "documents" if path.endswith(".md") else "code"
         totals[kind][0] += owner
@@ -193,14 +206,10 @@ def upstream_report(root, rev, report_path, upstream_rev):
     upstream_commits = set(git(root, "rev-list", upstream).split())
     changed = set(git(root, "diff", "--name-only", "-z", "--no-renames", upstream, commit).split("\0"))
     totals = {"code": [0, 0, 0], "documents": [0, 0, 0]}
-    rows, not_written = [], []
+    rows = []
     upstream_only_files = upstream_only_lines = 0
-    for path, lines in sorted(text_file_lines(root, commit).items()):
-        if path == report_path:
-            continue
-        if path in NOT_WRITTEN:
-            not_written.append(path)
-            continue
+    counted, not_written = counted_files(root, commit, report_path)
+    for path, lines in counted.items():
         if path in changed:
             counts = blame_counts_with_upstream(root, commit, path, coauthored, upstream_commits)
         else:
