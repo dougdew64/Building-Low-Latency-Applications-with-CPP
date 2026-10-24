@@ -23,7 +23,8 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   matching (price-time priority, partial fills, sweeps across price levels, cancels and rejected
   cancels); the incremental feed's sequence numbers; a snapshot's content; `PriceLevelTable`;
   recording requests, the running matcher's recording, and replaying them; the lockstep anchor's
-  tracer check. To call the snapshot
+  tracer check; the order server refusing requests the matcher can't process, and the trading
+  client's handling of a refusal. To call the snapshot
   synthesizer from them, `addToSnapshot()` and `publishSnapshot()` now declare their return type
   (`-> void`), which they deduced, so no other file could call them.
 - **An option for tests:** `exchange_main --snapshot-interval-seconds SECONDS` sets how often the
@@ -59,6 +60,17 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     initialized either: it had read as empty only because the 2 GB table made every book a fresh
     mapping of zeroed memory. It is now value-initialized.
   - `createSocket()` never freed the list `getaddrinfo()` returned (LeakSanitizer).
+  - One request could end the exchange. The matcher indexes its tables by a request's ids
+    unchecked: a ticker of 8 or more was undefined behaviour, and a client id of 256 or more or an
+    order id of 1,048,576 or more threw inside a `noexcept` function. The trading client numbers its
+    orders from 1 up, so a long enough run ended the exchange by itself. The order server now
+    checks each request as it arrives (`unprocessable()`, in `exchange/order_server/client_request.h`,
+    the check a recording is read with) and refuses one the matcher can't process before the
+    matcher, or its recording, sees it: a new order with a new response, `REJECTED`, and a cancel
+    with `CANCEL_REJECTED`, on the client's own response numbers. The trading client marks a
+    rejected order dead, so its strategy can send another. A client id of 256 or more is dropped and
+    logged instead, since the exchange keeps no connection or numbers to answer it with; the order
+    server's own tables, indexed by it, were undefined behaviour too.
   - Prices 256 or more ticks apart in one book corrupted it. Price levels were kept in an array of
     256 slots indexed by `price % 256`, so a bid at 356 joined the queue of the level at 100, and
     a sell at 101 then rested instead of trading with it, leaving the book crossed. Levels are now
@@ -83,12 +95,12 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   machine, which join on the default interface too (checked 2026-10-23: `ip route get 233.252.14.3`
   names the Wi-Fi interface). Fixing it means choosing the interface in the publisher and in every
   listener, the clients and Fillscope's viewer alike.
-- **The matcher trusts every request.** It indexes its tables by a request's ticker, client and
-  order ids unchecked: a ticker of 8 or more is undefined behaviour, and a client id of 256 or more
-  or an order id of 1,048,576 or more throws inside a `noexcept` function, ending the exchange. The
-  trading client numbers its orders from 1 up and never reuses one, so a long enough run ends the
-  exchange by itself. A new order that reuses a live order's id overwrites its slot, and the older
-  order can no longer be cancelled. (A recording is checked when read; live requests aren't.)
+- **A client has at most 1,048,576 order ids.** The matcher's table of a client's orders is indexed
+  by the order id, so the order server refuses an id of 1,048,576 or more. The trading client
+  numbers its orders from 1 up and never reuses one, so a long enough run of a strategy has every
+  further order rejected. Raising the limit means a table not indexed by the id.
+- **A new order that reuses a live order's id** overwrites its slot, and the older order can no
+  longer be cancelled. The order server can't see it: whether an id is live is the matcher's.
 - **A full queue is overwritten.** The lock-free queues (`common/lf_queue.h`) never check that
   there is room: a reader 256K entries behind, such as a stalled market data publisher, has unread
   entries overwritten, silently.
@@ -106,7 +118,7 @@ More changes follow, each listed here, as Fillscope's
 under the original MIT license ([LICENSE](LICENSE)).
 
 **Testing it** (from `Chapter12/`): `cmake -S . -B build -DLOWLATENCY_TESTS=ON && cmake --build build
-&& ctest --test-dir build --output-on-failure`. The tests take about 14 seconds and 4.3 GB of memory
+&& ctest --test-dir build --output-on-failure`. The tests take about 17 seconds and 4.3 GB of memory
 (the exchange's objects preallocate their pools), and use multicast, looped back to this machine.
 
 **Running it** (from `Chapter12/`): `bash scripts/build.sh` builds both configurations. Then start

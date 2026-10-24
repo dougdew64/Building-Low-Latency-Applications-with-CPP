@@ -64,6 +64,15 @@ namespace Exchange {
           auto request = reinterpret_cast<const OMClientRequest *>(socket->inbound_data_.data() + i);
           logger_.log("%:% %() % Received %\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str_), request->toString());
 
+          // Fillscope's fork: the tables below are indexed by the client id, so one past them is
+          // dropped before they are. It can't be answered: the exchange keeps no connection or
+          // sequence numbers for such a client.
+          if (UNLIKELY(request->me_client_request_.client_id_ >= ME_MAX_NUM_CLIENTS)) {
+            logger_.log("%:% %() % Dropped %: its client id is past the exchange's %\n", __FILE__, __LINE__, __FUNCTION__,
+                        Common::getCurrentTimeStr(&time_str_), request->toString(), ME_MAX_NUM_CLIENTS);
+            continue;
+          }
+
           if (UNLIKELY(cid_tcp_socket_[request->me_client_request_.client_id_] == nullptr)) { // first message from this ClientId.
             cid_tcp_socket_[request->me_client_request_.client_id_] = socket;
           }
@@ -84,6 +93,13 @@ namespace Exchange {
 
           ++next_exp_seq_num;
 
+          // Fillscope's fork: a request the matcher can't process is refused here, so it never
+          // reaches the matcher, nor its recording.
+          if (const auto why = unprocessable(request->me_client_request_); UNLIKELY(why.has_value())) {
+            refuse(socket, request->me_client_request_, *why);
+            continue;
+          }
+
           START_MEASURE(Exchange_FIFOSequencer_addClientRequest);
           fifo_sequencer_.addClientRequest(rx_time, request->me_client_request_);
           END_MEASURE(Exchange_FIFOSequencer_addClientRequest, logger_);
@@ -91,6 +107,23 @@ namespace Exchange {
         memcpy(socket->inbound_data_.data(), socket->inbound_data_.data() + i, socket->next_rcv_valid_index_ - i);
         socket->next_rcv_valid_index_ -= i;
       }
+    }
+
+    /// Fillscope's fork: answers a request the matcher can't process, on its client's connection
+    /// and next response sequence number: a new order (or a request of unknown type) with
+    /// REJECTED, a cancel with CANCEL_REJECTED. It goes out at once, so it can come before the
+    /// responses to the client's earlier requests, which the matcher has yet to send; each response
+    /// names its order.
+    auto refuse(Common::TCPSocket *socket, const MEClientRequest &request, const std::string &why) noexcept -> void {
+      const auto type = request.type_ == ClientRequestType::CANCEL ? ClientResponseType::CANCEL_REJECTED : ClientResponseType::REJECTED;
+      const MEClientResponse response{type, request.client_id_, request.ticker_id_, request.order_id_, OrderId_INVALID,
+                                      request.side_, request.price_, Qty_INVALID, Qty_INVALID};
+      logger_.log("%:% %() % Refused %: %\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str_),
+                  request.toString(), why);
+      auto &next_outgoing_seq_num = cid_next_outgoing_seq_num_[request.client_id_];
+      socket->send(&next_outgoing_seq_num, sizeof(next_outgoing_seq_num));
+      socket->send(&response, sizeof(MEClientResponse));
+      ++next_outgoing_seq_num;
     }
 
     /// End of reading incoming messages across all the TCP connections, sequence and publish the client requests to the matching engine.

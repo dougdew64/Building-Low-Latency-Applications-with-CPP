@@ -14,7 +14,10 @@ namespace Exchange {
     ACCEPTED = 1,
     CANCELED = 2,
     FILLED = 3,
-    CANCEL_REJECTED = 4
+    CANCEL_REJECTED = 4,
+    /// Fillscope's fork: a new order the order server refused, since the matcher couldn't process
+    /// it (its order id past the exchange's table, say). A refused cancel is CANCEL_REJECTED.
+    REJECTED = 5
   };
 
   inline std::string clientResponseTypeToString(ClientResponseType type) {
@@ -27,6 +30,8 @@ namespace Exchange {
         return "FILLED";
       case ClientResponseType::CANCEL_REJECTED:
         return "CANCEL_REJECTED";
+      case ClientResponseType::REJECTED:
+        return "REJECTED";
       case ClientResponseType::INVALID:
         return "INVALID";
     }

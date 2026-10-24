@@ -43,6 +43,11 @@ namespace Trading {
             order->order_state_ = OMOrderState::DEAD;
         }
           break;
+        // Fillscope's fork: the exchange refused the order, which never reached its book.
+        case Exchange::ClientResponseType::REJECTED: {
+          order->order_state_ = OMOrderState::DEAD;
+        }
+          break;
         case Exchange::ClientResponseType::CANCEL_REJECTED:
         case Exchange::ClientResponseType::INVALID: {
         }
