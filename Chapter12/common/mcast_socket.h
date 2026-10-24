@@ -35,6 +35,9 @@ namespace Common {
 
     int socket_fd_ = -1;
 
+    /// The interface init() was given, which join() joins on (Fillscope's fork).
+    std::string iface_;
+
     /// Send and receive buffers, typically only one or the other is needed, not both.
     std::vector<char> outbound_data_;
     size_t next_send_valid_index_ = 0;

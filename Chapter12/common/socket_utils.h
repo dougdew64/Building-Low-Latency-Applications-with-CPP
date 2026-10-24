@@ -85,9 +85,27 @@ namespace Common {
   }
 
   /// Add / Join membership / subscription to the multicast stream specified and on the interface specified.
-  inline auto join(int fd, const std::string &ip) -> bool {
-    const ip_mreq mreq{{inet_addr(ip.c_str())}, {htonl(INADDR_ANY)}};
+  /// Fillscope's fork: on that interface, as it says. It joined on the default interface (INADDR_ANY)
+  /// whatever it was given; an interface with no IPv4 address fails the join.
+  inline auto join(int fd, const std::string &ip, const std::string &iface) -> bool {
+    const auto iface_ip = getIfaceIP(iface);
+    if (iface_ip.empty()) {
+      return false;
+    }
+    const ip_mreq mreq{{inet_addr(ip.c_str())}, {inet_addr(iface_ip.c_str())}};
     return (setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) != -1);
+  }
+
+  /// Fillscope's fork: multicast sent from `fd` leaves on interface `iface`. Without it, it left on
+  /// the interface the system routes the group to (on a machine with Wi-Fi, onto the local network),
+  /// whatever interface the socket was given.
+  inline auto setMulticastInterface(int fd, const std::string &iface) -> bool {
+    const auto iface_ip = getIfaceIP(iface);
+    if (iface_ip.empty()) {
+      return false;
+    }
+    const in_addr address{inet_addr(iface_ip.c_str())};
+    return (setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &address, sizeof(address)) != -1);
   }
 
   /// Create a TCP / UDP socket to either connect to or listen for data on or listen for connections on the specified interface and IP:port information.
@@ -115,6 +133,10 @@ namespace Common {
 
       if (!socket_cfg.is_udp_) { // disable Nagle for TCP sockets.
         ASSERT(disableNagle(socket_fd), "disableNagle() failed. errno:" + std::string(strerror(errno)));
+      }
+
+      if (socket_cfg.is_udp_ && !socket_cfg.is_listening_) { // multicast leaves on the interface given.
+        ASSERT(setMulticastInterface(socket_fd, socket_cfg.iface_), "setMulticastInterface() failed for interface:" + socket_cfg.iface_ + " errno:" + std::string(strerror(errno)));
       }
 
       if (!socket_cfg.is_listening_) { // establish connection to specified address.

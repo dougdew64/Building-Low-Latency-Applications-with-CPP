@@ -1,4 +1,4 @@
-// The market data as it leaves the exchange, received over multicast (looped back to this machine):
+// The market data as it leaves the exchange, received over multicast on the loopback interface:
 // the incremental feed's sequence numbers, and a snapshot's content. Test-only groups and ports,
 // unlike the exchange's (233.252.14.x, ports 20000 and 20001), so a running exchange can't
 // interfere, and one each, so the tests can't interfere with one another.
@@ -22,7 +22,7 @@ using Common::Side;
 
 namespace {
   // A receiver joined as the trading client's consumer joins (socket_utils.h): bound to the port on
-  // any address, a member of the group on any interface.
+  // any address, a member of the group on the loopback interface, which the exchange sends on.
   class Receiver {
   public:
     Receiver(const char *group, int port) : fd_(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) {
@@ -30,7 +30,7 @@ namespace {
       setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
       const sockaddr_in address{AF_INET, htons(port), {htonl(INADDR_ANY)}, {}};
       EXPECT_EQ(bind(fd_, reinterpret_cast<const sockaddr *>(&address), sizeof(address)), 0) << std::strerror(errno);
-      const ip_mreq membership{{inet_addr(group)}, {htonl(INADDR_ANY)}};
+      const ip_mreq membership{{inet_addr(group)}, {htonl(INADDR_LOOPBACK)}};
       EXPECT_EQ(setsockopt(fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &membership, sizeof(membership)), 0) << std::strerror(errno);
       const timeval timeout{0, 100 * 1000};
       setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));

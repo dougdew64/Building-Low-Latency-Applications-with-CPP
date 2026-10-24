@@ -24,7 +24,8 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   cancels); the incremental feed's sequence numbers; a snapshot's content; `PriceLevelTable`;
   recording requests, the running matcher's recording, and replaying them; the lockstep anchor's
   tracer check; the order server refusing requests the matcher can't process, and the trading
-  client's handling of a refusal; the lock-free queue's order and its stop when full; and, in a program of their own
+  client's handling of a refusal; the lock-free queue's order and its stop when full; multicast staying on the interface a
+  socket is given; and, in a program of their own
   (`lowlatency_allocation_tests`), that the queues, the pools, the price levels and the snapshot's
   updates allocate nothing. To call the snapshot
   synthesizer from them, `addToSnapshot()` and `publishSnapshot()` now declare their return type
@@ -81,6 +82,19 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     found by their exact price, in `PriceLevelTable` (`exchange/matcher/price_level_table.h`): a
     hash table in a fixed array, so it allocates nothing, with linear probing and backward-shift
     deletion, tested against `std::map` through random inserts and removals.
+  - The market data left the machine. The exchange and the trading client name the loopback
+    interface (`lo`) for their multicast, but the sockets ignored the name: `createSocket()` set no
+    outgoing interface, so the exchange sent on the interface the system routes the groups to (on
+    a machine with Wi-Fi, every update onto the local network), and `join()` joined on the default
+    interface. With no network at all, neither worked (the same calls, made in a network namespace
+    with only loopback: the join failed with "No such device", the send with "Network is
+    unreachable").
+    Now a multicast sender sends on the interface it is given (`setMulticastInterface()`, in
+    `common/socket_utils.h`), stopping the program as it starts if that interface has no IPv4
+    address, and `McastSocket::join()` joins on the interface `init()` was given. Multicast over
+    loopback needs no privileges: `lo` lacks the `MULTICAST` flag, and it works anyway (checked
+    2026-10-24, Linux 7.2). Fillscope's viewer joins on loopback too, and its system test checks
+    that a listener joined on the default interface receives nothing from the exchange.
   - `ASSERT` (`common/macros.h`) was a function taking a `std::string`, so every call built its
     message, even when the check held, and a message longer than a string's own buffer (15
     characters) allocated: on every message read from a queue, every allocation and release from a
@@ -106,14 +120,6 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   ignore these allocations.) It also sleeps a second after starting each thread.
 - **Shutdown is slow:** each `MEOrderBook`'s destructor clears its 2 GB table of client orders,
   which takes seconds per book.
-- **Market data leaves the machine.** `exchange_main` names the loopback interface (`lo`) for its
-  market data, but `createSocket()` uses the interface name only when it is given no address, and
-  it always is, and sets no outgoing interface: so the exchange sends its multicast on the interface
-  the system routes the groups to (on a machine with Wi-Fi, onto the local network; the default
-  time-to-live of 1 keeps it on the subnet), and the system loops a copy back to listeners on the
-  machine, which join on the default interface too (checked 2026-10-23: `ip route get 233.252.14.3`
-  names the Wi-Fi interface). Fixing it means choosing the interface in the publisher and in every
-  listener, the clients and Fillscope's viewer alike.
 - **A client has at most 1,048,576 order ids.** The matcher's table of a client's orders is indexed
   by the order id, so the order server refuses an id of 1,048,576 or more. The trading client
   numbers its orders from 1 up and never reuses one, so a long enough run of a strategy has every
@@ -137,7 +143,7 @@ under the original MIT license ([LICENSE](LICENSE)).
 
 **Testing it** (from `Chapter12/`): `cmake -S . -B build -DLOWLATENCY_TESTS=ON && cmake --build build
 && ctest --test-dir build --output-on-failure`. The tests take about 17 seconds and 4.3 GB of memory
-(the exchange's objects preallocate their pools), and use multicast, looped back to this machine.
+(the exchange's objects preallocate their pools), and use multicast on the loopback interface.
 
 **Running it** (from `Chapter12/`): `bash scripts/build.sh` builds both configurations. Then start
 the exchange, `./cmake-build-release/exchange_main &`, wait ten seconds, and start the clients,

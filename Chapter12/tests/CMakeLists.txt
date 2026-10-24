@@ -12,7 +12,8 @@ endif()
 
 add_executable(lowlatency_tests
   test_main.cpp test_support.cpp market_update_test.cpp price_level_table_test.cpp order_book_test.cpp
-  market_data_test.cpp replay_test.cpp lockstep_anchor_test.cpp order_server_test.cpp lf_queue_test.cpp)
+  market_data_test.cpp replay_test.cpp lockstep_anchor_test.cpp order_server_test.cpp lf_queue_test.cpp
+  mcast_socket_test.cpp)
 target_link_libraries(lowlatency_tests PRIVATE libexchange libtrading libcommon pthread GTest::gtest)
 
 # What must not allocate, in a program of its own: it replaces operator new with one that counts.
