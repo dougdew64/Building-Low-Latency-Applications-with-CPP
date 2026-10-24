@@ -7,10 +7,12 @@
 
 namespace Exchange {
   auto replay(const std::vector<MEClientRequest> &requests, MatchingEngine &engine, MEMarketUpdateLFQueue &updates,
-              ClientResponseLFQueue &responses) -> std::vector<MDPMarketUpdate> {
+              ClientResponseLFQueue &responses, const AfterRequest &after_each) -> std::vector<MDPMarketUpdate> {
     std::vector<MDPMarketUpdate> published;
     size_t next_seq = 1;  // as MarketDataPublisher::next_inc_seq_num_ starts
+    uint64_t request_number = 0;
     for (const auto &request : requests) {
+      const auto first = published.size();
       engine.processClientRequest(&request);
       // Emptied after every request, so the queues can't fill however long the recording.
       for (auto next = updates.getNextToRead(); updates.size() && next; next = updates.getNextToRead()) {
@@ -19,6 +21,9 @@ namespace Exchange {
       }
       for (auto next = responses.getNextToRead(); responses.size() && next; next = responses.getNextToRead()) {
         responses.updateReadIndex();
+      }
+      if (after_each) {
+        after_each(++request_number, std::span<const MDPMarketUpdate>{published}.subspan(first));
       }
     }
     return published;

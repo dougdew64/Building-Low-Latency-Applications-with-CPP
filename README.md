@@ -30,6 +30,14 @@ chapters are as upstream has them. (At the top level it adds this section and a 
   (`exchange/matcher/replay.h`). The matcher is single-threaded and reads no clock, so a recording
   replays to the very updates the live exchange published, byte for byte: Fillscope's system test
   checks it against a live run.
+- **Debugger lockstep on a replay:** `exchange_replay RECORDING --publish GROUP:PORT` sends each
+  request's market updates on that multicast group, as the exchange's publisher would, then calls
+  a lockstep anchor, `fillscope_request_anchor(request_number, updates_published)`
+  (`exchange/matcher/lockstep_anchor.h`), where a debugger stops (by a breakpoint set on it by name,
+  or, with `--self-stop`, by the anchor itself when the replay is traced). A viewer listening to the
+  group then shows the books after each request as the debugger stops after it; Fillscope's
+  debugger tests check this under GDB and LLDB, at -O0 and -O2. `--interval-ms` paces a replay to
+  watch without a debugger; the market data file is now optional when publishing.
 - **Bugs fixed,** each found by a test that failed before its fix:
   - `MEOrderBook`'s table of every client's orders was never initialized, so cancelling an order
     that was never sent read a garbage pointer (the sanitizer build crashed; elsewhere the system's

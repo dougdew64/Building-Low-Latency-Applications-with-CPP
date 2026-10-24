@@ -8,7 +8,10 @@
 // bytes, numbered from 1. So after the header, the file is byte for byte the incremental stream a
 // live exchange published for the same requests.
 
+#include <cstdint>
+#include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -20,11 +23,15 @@
 namespace Exchange {
   inline constexpr char kMarketDataMagic[8] = {'L', 'L', 'M', 'D', 'A', 'T', '0', '1'};
 
+  /// Called after each request with its number (from 1) and the market updates it made.
+  using AfterRequest = std::function<void(uint64_t request_number, std::span<const MDPMarketUpdate> updates)>;
+
   /// Feeds `requests` to `engine`, which must be fresh and not started, in order, as its run() does,
   /// and returns the market updates it publishes, numbered from 1 as the market data publisher
   /// numbers them. The engine writes into `updates` and `responses`, which are emptied as it goes.
+  /// `after_each`, if given, is called after each request, before the next.
   auto replay(const std::vector<MEClientRequest> &requests, MatchingEngine &engine, MEMarketUpdateLFQueue &updates,
-              ClientResponseLFQueue &responses) -> std::vector<MDPMarketUpdate>;
+              ClientResponseLFQueue &responses, const AfterRequest &after_each = {}) -> std::vector<MDPMarketUpdate>;
 
   /// Writes the market data file; returns why it couldn't, if it couldn't.
   auto writeMarketData(const std::string &path, const std::string &recording_path,

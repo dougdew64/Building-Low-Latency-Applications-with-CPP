@@ -1,38 +1,143 @@
 // Fillscope's fork: replays a recording of the exchange's requests (exchange_main --record) through a
-// fresh matching engine, with no clients and no network, and writes the market data it publishes
-// (exchange/matcher/replay.h).
+// fresh matching engine, with no clients and no network (exchange/matcher/replay.h).
 //
-//   exchange_replay RECORDING MARKET_DATA_FILE
+//   exchange_replay RECORDING [MARKET_DATA_FILE] [--publish GROUP:PORT] [--self-stop] [--interval-ms MS]
+//
+// MARKET_DATA_FILE: write the market data the replay publishes to this file.
+// --publish: after each request, send its market updates on this multicast group, as the exchange's
+//   publisher would, then call the lockstep anchor (matcher/lockstep_anchor.h): so a debugger stopped
+//   there finds a viewer listening to the group already showing the books after that request.
+//   Start the viewer first: a replay publishes no snapshots for a late one to recover from.
+// --self-stop: under a debugger, stop in the anchor after each request, with no breakpoint set.
+// --interval-ms: wait this long after each request, to watch it run without a debugger.
+//
+// One of MARKET_DATA_FILE and --publish is needed.
 
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <optional>
+#include <string>
+#include <thread>
 
+#include "common/logging.h"
+#include "common/mcast_socket.h"
+#include "matcher/lockstep_anchor.h"
 #include "matcher/matching_engine.h"
 #include "matcher/replay.h"
 #include "matcher/request_recording.h"
 
+namespace {
+  constexpr const char *kUsage =
+      "usage: exchange_replay RECORDING [MARKET_DATA_FILE] [--publish GROUP:PORT] [--self-stop] [--interval-ms MS]";
+
+  struct Options {
+    std::string recording;
+    std::optional<std::string> market_data_file;
+    std::optional<std::string> group;
+    int port = 0;
+    bool self_stop = false;
+    long interval_ms = 0;
+  };
+
+  auto parse(int argc, char **argv) -> std::optional<Options> {
+    Options options;
+    std::optional<std::string> positional[2];
+    int positionals = 0;
+    for (int i = 1; i < argc; ++i) {
+      const std::string arg = argv[i];
+      if (arg == "--self-stop") {
+        options.self_stop = true;
+      } else if (arg == "--publish" && i + 1 < argc) {
+        const std::string value = argv[++i];
+        const auto colon = value.rfind(':');
+        char *end = nullptr;
+        const long port = colon == std::string::npos ? 0 : std::strtol(value.c_str() + colon + 1, &end, 10);
+        if (colon == std::string::npos || colon == 0 || *end != '\0' || port <= 0 || port > 65535) {
+          return std::nullopt;
+        }
+        options.group = value.substr(0, colon);
+        options.port = static_cast<int>(port);
+      } else if (arg == "--interval-ms" && i + 1 < argc) {
+        char *end = nullptr;
+        options.interval_ms = std::strtol(argv[++i], &end, 10);
+        if (*end != '\0' || options.interval_ms < 0) {
+          return std::nullopt;
+        }
+      } else if (!arg.starts_with("--") && positionals < 2) {
+        positional[positionals++] = arg;
+      } else {
+        return std::nullopt;
+      }
+    }
+    if (positionals == 0 || (positionals == 1 && !options.group)) {
+      return std::nullopt;
+    }
+    options.recording = *positional[0];
+    options.market_data_file = positional[1];
+    return options;
+  }
+}
+
 int main(int argc, char **argv) {
-  if (argc != 3) {
-    std::cerr << "usage: exchange_replay RECORDING MARKET_DATA_FILE" << std::endl;
+  const auto options = parse(argc, argv);
+  if (!options) {
+    std::cerr << kUsage << std::endl;
     return 2;
   }
-  const auto recording = Exchange::readRecording(argv[1]);
+  const auto recording = Exchange::readRecording(options->recording);
   if (recording.error) {
     std::cerr << "exchange_replay: " << *recording.error << std::endl;
     return 1;
   }
   // Never destroyed: the matching engine's destructor sleeps a second and clears 2 GB per book. The
-  // program ends as soon as the file is written.
+  // program ends as soon as the replay has finished.
   auto *updates = new Exchange::MEMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
   auto *responses = new Exchange::ClientResponseLFQueue(Common::ME_MAX_CLIENT_UPDATES);
   auto *requests = new Exchange::ClientRequestLFQueue(Common::ME_MAX_CLIENT_UPDATES);  // the engine needs one; unused
   auto *engine = new Exchange::MatchingEngine(requests, responses, updates);
 
-  const auto published = Exchange::replay(recording.requests, *engine, *updates, *responses);
-  if (const auto error = Exchange::writeMarketData(argv[2], argv[1], published)) {
-    std::cerr << "exchange_replay: " << *error << std::endl;
-    return 1;
+  Common::McastSocket *socket = nullptr;
+  if (options->group) {
+    auto *logger = new Common::Logger("exchange_replay.log");
+    socket = new Common::McastSocket(*logger);
+    if (socket->init(*options->group, "lo", options->port, /*is_listening*/ false) < 0) {
+      std::cerr << "exchange_replay: can't publish to " << *options->group << ":" << options->port << ": "
+                << std::strerror(errno) << std::endl;
+      return 1;
+    }
   }
-  std::cout << "exchange_replay: " << recording.requests.size() << " requests, " << published.size()
-            << " market updates, written to " << argv[2] << std::endl;
+  Exchange::setSelfStop(options->self_stop);
+
+  uint64_t sent = 0;
+  const auto after_each = [&](uint64_t request_number, std::span<const Exchange::MDPMarketUpdate> made) {
+    if (socket) {
+      // As the exchange's publisher sends them: each update's number, then the update; the datagram
+      // goes out before the anchor, so a viewer has it when a debugger stops there.
+      for (const auto &update : made) {
+        socket->send(&update.seq_num_, sizeof(update.seq_num_));
+        socket->send(&update.me_market_update_, sizeof(update.me_market_update_));
+      }
+      socket->sendAndRecv();
+      sent += made.size();
+    }
+    fillscope_request_anchor(request_number, sent);
+    if (options->interval_ms > 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{options->interval_ms});
+    }
+  };
+  const auto published = Exchange::replay(recording.requests, *engine, *updates, *responses, after_each);
+
+  if (options->market_data_file) {
+    if (const auto error = Exchange::writeMarketData(*options->market_data_file, options->recording, published)) {
+      std::cerr << "exchange_replay: " << *error << std::endl;
+      return 1;
+    }
+  }
+  std::cout << "exchange_replay: " << recording.requests.size() << " requests, " << published.size() << " market updates"
+            << (options->market_data_file ? ", written to " + *options->market_data_file : std::string{})
+            << (socket ? ", published to " + *options->group + ":" + std::to_string(options->port) : std::string{})
+            << std::endl;
   return 0;
 }
