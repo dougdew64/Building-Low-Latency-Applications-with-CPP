@@ -25,9 +25,18 @@ jobs:
     steps:
       - name: Install the toolchain
         working-directory: /
-        run: dnf install -y --setopt=install_weak_deps=False gcc-c++ libasan libubsan cmake ninja-build git
+        run: dnf install -y --setopt=install_weak_deps=False gcc-c++ libasan libubsan cmake ninja-build git python3
       # Pinned to the commit of a release (named in the comment), not a movable tag.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          fetch-depth: 0  # the whole history: the attribution check runs git blame
+      - name: Trust the checkout
+        # The container runs as root and the checkout belongs to another user, which git refuses.
+        working-directory: /
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: The attribution report is exactly what its commit gives
+        working-directory: .
+        run: python3 -I tools/attribution/attribution.py --report ATTRIBUTION.md --check
       - name: Toolchain versions
         run: g++ --version | head -1; cmake --version | head -1
       - name: Tests, normal build

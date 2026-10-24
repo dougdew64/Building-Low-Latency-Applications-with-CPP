@@ -14,3 +14,8 @@ Here, in addition:
   the README's section on this fork.
 - Test what Fillscope relies on and every change; a bug found in the book's code gets a test that
   fails before its fix.
+- In every commit it makes, Claude first regenerates `ATTRIBUTION.md`, the count of each file's
+  lines by upstream, the owner and Claude: `python3 -I tools/attribution/attribution.py --report
+  ATTRIBUTION.md --upstream 11e3925f431f7c8c39739ed90b874d6ff2aa2966` (upstream's last commit before
+  the fork). The script is a copy of Fillscope's (`tools/attribution/`), which Fillscope's tests keep
+  identical: change it there.
