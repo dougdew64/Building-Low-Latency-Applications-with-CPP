@@ -10,20 +10,22 @@
 
 namespace Exchange {
   namespace {
-    auto writeAll(int fd, const void *data, size_t size) -> bool {
+    /// Writes all `size` bytes, or as many as it can; returns how many it wrote. If fewer, errno
+    /// says why.
+    auto writeAll(int fd, const void *data, size_t size) -> size_t {
       const auto *bytes = static_cast<const char *>(data);
-      while (size > 0) {
-        const auto written = ::write(fd, bytes, size);
+      size_t done = 0;
+      while (done < size) {
+        const auto written = ::write(fd, bytes + done, size - done);
         if (written < 0 && errno == EINTR) {
           continue;
         }
         if (written <= 0) {
-          return false;
+          break;
         }
-        bytes += written;
-        size -= static_cast<size_t>(written);
+        done += static_cast<size_t>(written);
       }
-      return true;
+      return done;
     }
   }
 
@@ -31,7 +33,7 @@ namespace Exchange {
       : fd_(::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)) {
     if (fd_ < 0) {
       error_ = "can't create the recording " + path + ": " + std::strerror(errno);
-    } else if (!writeAll(fd_, kRecordingMagic, sizeof(kRecordingMagic))) {
+    } else if (writeAll(fd_, kRecordingMagic, sizeof(kRecordingMagic)) != sizeof(kRecordingMagic)) {
       error_ = "can't write the recording " + path + ": " + std::strerror(errno);
     }
   }
@@ -46,9 +48,15 @@ namespace Exchange {
     if (fd_ < 0 || error_) {
       return;
     }
-    if (!writeAll(fd_, &request, sizeof(request))) {
+    if (const auto written = writeAll(fd_, &request, sizeof(request)); written != sizeof(request)) {
       // The exchange runs on; said at once, since a recording that ends early reads as a whole one.
       error_ = "can't write to the recording, so it stops after " + std::to_string(recorded_) + " requests: " + std::strerror(errno);
+      // A write cut off part-way leaves part of a request, and a recording that ends with one can't
+      // be read at all: it is cut back to the last whole request, so what was recorded replays.
+      if (written > 0 && ::ftruncate(fd_, static_cast<off_t>(sizeof(kRecordingMagic) + recorded_ * sizeof(request))) != 0) {
+        *error_ += "; and it ends with part of a request, which can't be removed (" + std::string{std::strerror(errno)} +
+                   "), so it can't be replayed";
+      }
       std::fprintf(stderr, "exchange_main: %s\n", error_->c_str());
       return;
     }

@@ -17,6 +17,9 @@
 #include "matcher/request_recording.h"
 #include "test_support.h"
 
+#include <spawn.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 using namespace Exchange;
@@ -131,6 +134,56 @@ TEST(RequestRecording, AFailedWriteStopsTheRecordingAndSaysWhy) {
   }
   std::signal(SIGPIPE, previous);
   ::close(pipe_ends[1]);
+}
+
+// A write cut off part-way, as when the disk fills in the middle of a request, leaves part of one; a
+// recording that ends with one can't be read, so it is cut back to the last whole request. A limit
+// on the file's size (RLIMIT_FSIZE) makes the write stop part-way: the third request's write gets
+// 10 of its bytes in, and its next write fails (EFBIG). The limit would stop this program's other
+// files too, so the recorder runs in a child: this program again, started with posix_spawn, since
+// fork() can fail here (the exchange's objects map gigabytes, and the sanitizer build refuses it).
+TEST(RequestRecording, AWriteCutOffPartWayLeavesTheWholeRequestsBefore) {
+  if (const char *path = std::getenv("LOWLATENCY_CUT_OFF_RECORDING")) {
+    const rlimit limit{8 + 2 * sizeof(MEClientRequest) + 10, RLIM_INFINITY};
+    std::signal(SIGXFSZ, SIG_IGN);  // the write then fails rather than ending the child
+    if (::setrlimit(RLIMIT_FSIZE, &limit) != 0) {
+      ::_exit(2);
+    }
+    RequestRecorder recorder{path};
+    for (const auto &r : kRequests) {
+      recorder.record(r);
+    }
+    const bool said = recorder.error() && recorder.error()->find("stops after 2 requests") != std::string::npos &&
+                      recorder.error()->find("part of a request") == std::string::npos;
+    ::_exit(said ? 0 : 3);
+  }
+  const auto path = (std::filesystem::current_path() / "cut-off.rec").string();
+  std::string program(4096, '\0');
+  const auto length = ::readlink("/proc/self/exe", program.data(), program.size());
+  ASSERT_GT(length, 0);
+  program.resize(static_cast<size_t>(length));
+  std::string filter = "--gtest_filter=RequestRecording.AWriteCutOffPartWayLeavesTheWholeRequestsBefore";
+  char *const argv[] = {program.data(), filter.data(), nullptr};
+  std::vector<char *> env;
+  for (char **variable = environ; *variable != nullptr; ++variable) {
+    env.push_back(*variable);
+  }
+  std::string marker = "LOWLATENCY_CUT_OFF_RECORDING=" + path;
+  env.push_back(marker.data());
+  env.push_back(nullptr);
+  pid_t child = 0;
+  ASSERT_EQ(::posix_spawn(&child, program.c_str(), nullptr, nullptr, argv, env.data()), 0);
+  int status = 0;
+  ASSERT_EQ(::waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0) << "2: setrlimit failed; 3: the recorder didn't say it stopped after 2 requests";
+
+  EXPECT_EQ(readFile(path).size(), 8 + 2 * sizeof(MEClientRequest)) << "the part of the third request is still there";
+  const auto recording = readRecording(path);
+  ASSERT_FALSE(recording.error) << *recording.error;
+  ASSERT_EQ(recording.requests.size(), 2u);
+  EXPECT_EQ(fields(recording.requests[0]), fields(kRequests[0]));
+  EXPECT_EQ(fields(recording.requests[1]), fields(kRequests[1]));
 }
 
 // An empty recording, just its header (as one is before the exchange's first request), reads as no

@@ -38,7 +38,9 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   (`exchange/matcher/replay.h`). The matcher is single-threaded and reads no clock, so a recording
   replays to the very updates the live exchange published, byte for byte: Fillscope's system test
   checks it against a live run. A recording is opened only once the whole command line has been
-  read; if a write to it fails, it stops there and the exchange says so on stderr. Reading one
+  read; if a write to it fails, it stops there and the exchange says so on stderr, and runs on. A
+  write cut off part-way would leave part of a request, which makes a recording unreadable, so the
+  file is cut back to the last whole request: what was recorded still replays. Reading one
   refuses a request the matcher can't process (a ticker, client or order id past its tables, an
   unknown type or a new order's unknown side), naming it.
 - **Debugger lockstep on a replay:** `exchange_replay RECORDING --publish GROUP:PORT` sends each
@@ -107,8 +109,10 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
 - **A backlog of market data can be lost whole.** The publisher sends everything queued in one
   datagram, and `McastSocket::sendAndRecv()` only logs a failed `send()`: more than about 1,559
   updates (65,507 bytes) at once fail with `EMSGSIZE`, and a listener sees a gap.
-- **A recording that can't be written ends, and the exchange runs on.** It says so on stderr; the
-  run then has no complete recording to replay.
+- **A recording that can't be written ends, and the exchange runs on** (Fillscope's owner chose
+  this, 2026-10-24: the recording is for studying a run, and shouldn't stop the trading). It says
+  so on stderr, with how many requests it holds; nothing in the file says it ends early, and the
+  rest of the run can't be replayed.
 - **`createSocket()` doesn't check `connect()`:** it compares the result with 1, which `connect()`
   never returns. (Comparing with -1 would fail the non-blocking connect it makes, which reports
   "in progress" as -1.)
