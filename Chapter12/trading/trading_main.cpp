@@ -4,6 +4,7 @@
 #include "order_gw/order_gateway.h"
 #include "market_data/market_data_consumer.h"
 
+#include "common/endpoints.h"
 #include "common/logging.h"
 
 /// Main components.
@@ -14,8 +15,27 @@ Trading::OrderGateway *order_gateway = nullptr;
 
 /// ./trading_main CLIENT_ID ALGO_TYPE [CLIP_1 THRESH_1 MAX_ORDER_SIZE_1 MAX_POS_1 MAX_LOSS_1] [CLIP_2 THRESH_2 MAX_ORDER_SIZE_2 MAX_POS_2 MAX_LOSS_2] ...
 int main(int argc, char **argv) {
+  const std::string usage = std::string("USAGE trading_main CLIENT_ID ALGO_TYPE [CLIP_1 THRESH_1 MAX_ORDER_SIZE_1 MAX_POS_1 MAX_LOSS_1] [CLIP_2 THRESH_2 MAX_ORDER_SIZE_2 MAX_POS_2 MAX_LOSS_2] ... ") +
+                            Common::kEndpointsUsage;
+  // Fillscope's fork: where the exchange is (common/endpoints.h; the book's addresses by default),
+  // given anywhere on the command line; the other arguments are read as before, in order.
+  Common::Endpoints endpoints;
+  std::vector<char *> positional{argv[0]};
+  for (int i = 1; i < argc; ++i) {
+    if (const int took = Common::parseEndpointOption(argc, argv, i, endpoints); took < 0) {
+      FATAL(usage);
+    } else if (took > 0) {
+      i += took - 1;
+    } else {
+      positional.push_back(argv[i]);
+    }
+  }
+  argc = static_cast<int>(positional.size());
+  positional.push_back(nullptr);
+  argv = positional.data();
+
   if(argc < 3) {
-    FATAL("USAGE trading_main CLIENT_ID ALGO_TYPE [CLIP_1 THRESH_1 MAX_ORDER_SIZE_1 MAX_POS_1 MAX_LOSS_1] [CLIP_2 THRESH_2 MAX_ORDER_SIZE_2 MAX_POS_2 MAX_LOSS_2] ...");
+    FATAL(usage);
   }
 
   const Common::ClientId client_id = atoi(argv[1]);
@@ -56,17 +76,17 @@ int main(int argc, char **argv) {
 
   const std::string order_gw_ip = "127.0.0.1";
   const std::string order_gw_iface = "lo";
-  const int order_gw_port = 12345;
+  const int order_gw_port = endpoints.order_port;
 
   logger->log("%:% %() % Starting Order Gateway...\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str));
   order_gateway = new Trading::OrderGateway(client_id, &client_requests, &client_responses, order_gw_ip, order_gw_iface, order_gw_port);
   order_gateway->start();
 
   const std::string mkt_data_iface = "lo";
-  const std::string snapshot_ip = "233.252.14.1";
-  const int snapshot_port = 20000;
-  const std::string incremental_ip = "233.252.14.3";
-  const int incremental_port = 20001;
+  const std::string snapshot_ip = endpoints.snapshot.group;
+  const int snapshot_port = endpoints.snapshot.port;
+  const std::string incremental_ip = endpoints.incremental.group;
+  const int incremental_port = endpoints.incremental.port;
 
   logger->log("%:% %() % Starting Market Data Consumer...\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str));
   market_data_consumer = new Trading::MarketDataConsumer(client_id, &market_updates, mkt_data_iface, snapshot_ip, snapshot_port, incremental_ip, incremental_port);

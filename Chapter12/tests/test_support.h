@@ -29,4 +29,11 @@ namespace LowLatencyTests {
   // set. The child is started with posix_spawn, since fork() can fail here: the exchange's objects
   // map gigabytes, and the sanitizer build refuses it.
   auto runInChild(const std::string &test, const std::string &marker) -> int;
+
+  // A port of this process's own, `index` from 0 to 9, for a test's multicast or TCP. The process
+  // claims a numbered slot, 0 to 999, by locking a file of that number in fillscope-test-ports in
+  // the temporary directory, and holds it until it exits; slot N has ports 22000 + 10 N to
+  // 22000 + 10 N + 9. Fillscope's tests claim slots by the same rule (its RUNNING.md), so no two
+  // processes running tests at once share a port, and none uses the exchange's own.
+  auto testPort(int index) -> int;
 }

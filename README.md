@@ -25,7 +25,7 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   recording requests, the running matcher's recording, and replaying them; the lockstep anchor's
   tracer check; the order server refusing requests the matcher can't process, and the trading
   client's handling of a refusal; the lock-free queue's order and its stop when full; multicast staying on the interface a
-  socket is given; and, in a program of their own
+  socket is given; the options for where the programs meet; and, in a program of their own
   (`lowlatency_allocation_tests`), that the queues, the pools, the price levels and the snapshot's
   updates allocate nothing. To call the snapshot
   synthesizer from them, `addToSnapshot()` and `publishSnapshot()` now declare their return type
@@ -34,6 +34,13 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   exchange publishes a snapshot (the book's 60 s by default; from 0.001 to 1,000,000), so a test of recovering from a
   snapshot need not wait a minute; the snapshot synthesizer and the market data publisher take it
   as a constructor argument with that default. Without arguments the exchange runs as before.
+- **Options for where the programs meet:** `exchange_main` and `trading_main` both take
+  `--order-port PORT`, `--snapshot GROUP:PORT` and `--incremental GROUP:PORT`
+  (`common/endpoints.h`; `trading_main` takes them anywhere on its command line, and reads its
+  other arguments as before), the book's addresses by default. Tests run their exchange and client
+  on ports of their own, so nothing else on the machine using the book's (a replay stepped in a
+  debugger, another run of the tests) reaches them. The tests' own sockets take ports the same
+  way (`testPort()`, in `tests/test_support.h`).
 - **Deterministic replay:** `exchange_main --record FILE` records the requests the matching engine
   processes, in the order it processes them (`exchange/matcher/request_recording.h`), and a new
   program, `exchange_replay RECORDING MARKET_DATA_FILE`, feeds them through a fresh matching engine,

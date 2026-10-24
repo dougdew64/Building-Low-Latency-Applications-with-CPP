@@ -1,8 +1,9 @@
 // The order server refuses, as they arrive, the requests the matcher can't process: it answers a
 // new order with REJECTED and a cancel with CANCEL_REJECTED, on the client's own response numbers,
 // and passes the client's next requests on as before. A request from a client id past its tables is
-// dropped. One order server, on loopback port 12346, serves every test; each test is a client of
-// its own (client ids 1 to 8), since the server keeps each client's connection and numbers.
+// dropped. One order server, on a loopback port of this process's own (testPort), serves every
+// test; each test is a client of its own (client ids 1 to 8), since the server keeps each client's
+// connection and numbers.
 #include <gtest/gtest.h>
 
 #include <arpa/inet.h>
@@ -25,7 +26,7 @@ using namespace Exchange;
 using Common::Side;
 
 namespace {
-  constexpr int kPort = 12346;
+  const int kPort = LowLatencyTests::testPort(5);
   using LowLatencyTests::value;
 
   // Never destroyed: destroying an order server sleeps for a second, and its thread outlives it.

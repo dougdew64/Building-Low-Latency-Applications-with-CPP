@@ -1,8 +1,14 @@
 #include "test_support.h"
 
+#include <fcntl.h>
 #include <spawn.h>
+#include <sys/file.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include <cstdlib>
+#include <filesystem>
+#include <iostream>
 
 namespace LowLatencyTests {
   namespace {
@@ -63,5 +69,26 @@ namespace LowLatencyTests {
       return -1;
     }
     return status;
+  }
+
+  auto testPort(int index) -> int {
+    static const int slot = [] {
+      const auto directory = std::filesystem::temp_directory_path() / "fillscope-test-ports";
+      std::error_code ignored;
+      std::filesystem::create_directories(directory, ignored);
+      for (int candidate = 0; candidate < 1000; ++candidate) {
+        const auto path = directory / ("slot-" + std::to_string(candidate));
+        const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+        if (fd >= 0 && ::flock(fd, LOCK_EX | LOCK_NB) == 0) {
+          return candidate;  // the descriptor stays open, and the lock held, until the process exits
+        }
+        if (fd >= 0) {
+          ::close(fd);
+        }
+      }
+      std::cerr << "testPort: every slot in " << directory << " is taken\n";
+      std::abort();
+    }();
+    return 22000 + 10 * slot + index;
   }
 }

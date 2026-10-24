@@ -21,7 +21,7 @@
 
 namespace {
   constexpr const char *kGroup = "233.252.15.9";
-  constexpr int kPort = 21005;
+  const int kPort = LowLatencyTests::testPort(4);
 
   auto logger() -> Common::Logger & {
     static auto *const instance = new Common::Logger("tests_mcast_socket.log");

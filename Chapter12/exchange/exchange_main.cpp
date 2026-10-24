@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 
+#include "common/endpoints.h"
 #include "matcher/matching_engine.h"
 #include "market_data/market_data_publisher.h"
 #include "order_server/order_server.h"
@@ -35,22 +36,27 @@ void signal_handler(int) {
 }
 
 int main(int argc, char **argv) {
-  // Fillscope's fork: two options. How often the snapshot synthesizer publishes a snapshot (the book's
-  // 60 s by default), so a test of snapshot recovery need not wait a minute for one; and a file to
-  // record the matcher's requests in (matcher/request_recording.h), for exchange_replay.
+  // Fillscope's fork: options. How often the snapshot synthesizer publishes a snapshot (the book's
+  // 60 s by default), so a test of snapshot recovery need not wait a minute for one; a file to
+  // record the matcher's requests in (matcher/request_recording.h), for exchange_replay; and where
+  // it takes orders and publishes market data (common/endpoints.h; the book's addresses by default).
   const auto usage = [] {
-    std::cerr << "usage: exchange_main [--snapshot-interval-seconds SECONDS] [--record FILE]  (SECONDS from 0.001 to "
-                 "1000000; default 60)"
-              << std::endl;
+    std::cerr << "usage: exchange_main [--snapshot-interval-seconds SECONDS] [--record FILE] " << Common::kEndpointsUsage
+              << "  (SECONDS from 0.001 to 1000000; default 60)" << std::endl;
     return 2;
   };
   Common::Nanos snapshot_interval = 60 * Common::NANOS_TO_SECS;
   const char *record_path = nullptr;
+  Common::Endpoints endpoints;
   for (int i = 1; i < argc; i += 2) {
     if (i + 1 >= argc) {
       return usage();
     }
-    if (std::strcmp(argv[i], "--snapshot-interval-seconds") == 0) {
+    if (const int took = Common::parseEndpointOption(argc, argv, i, endpoints); took != 0) {
+      if (took < 0) {
+        return usage();
+      }
+    } else if (std::strcmp(argv[i], "--snapshot-interval-seconds") == 0) {
       char *end = nullptr;
       const double seconds = std::strtod(argv[i + 1], &end);
       // Bounded, so the nanoseconds fit in an int64 (inf or 1e10 would overflow it, undefined
@@ -94,8 +100,8 @@ int main(int argc, char **argv) {
   matching_engine->start();
 
   const std::string mkt_pub_iface = "lo";
-  const std::string snap_pub_ip = "233.252.14.1", inc_pub_ip = "233.252.14.3";
-  const int snap_pub_port = 20000, inc_pub_port = 20001;
+  const std::string snap_pub_ip = endpoints.snapshot.group, inc_pub_ip = endpoints.incremental.group;
+  const int snap_pub_port = endpoints.snapshot.port, inc_pub_port = endpoints.incremental.port;
 
   logger->log("%:% %() % Starting Market Data Publisher...\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str));
   market_data_publisher = new Exchange::MarketDataPublisher(&market_updates, mkt_pub_iface, snap_pub_ip, snap_pub_port, inc_pub_ip, inc_pub_port,
@@ -103,7 +109,7 @@ int main(int argc, char **argv) {
   market_data_publisher->start();
 
   const std::string order_gw_iface = "lo";
-  const int order_gw_port = 12345;
+  const int order_gw_port = endpoints.order_port;
 
   logger->log("%:% %() % Starting Order Server...\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str));
   order_server = new Exchange::OrderServer(&client_requests, &client_responses, order_gw_iface, order_gw_port);

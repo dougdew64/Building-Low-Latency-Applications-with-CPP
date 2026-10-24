@@ -13,11 +13,11 @@ endif()
 add_executable(lowlatency_tests
   test_main.cpp test_support.cpp market_update_test.cpp price_level_table_test.cpp order_book_test.cpp
   market_data_test.cpp replay_test.cpp lockstep_anchor_test.cpp order_server_test.cpp lf_queue_test.cpp
-  mcast_socket_test.cpp)
+  mcast_socket_test.cpp endpoints_test.cpp)
 target_link_libraries(lowlatency_tests PRIVATE libexchange libtrading libcommon pthread GTest::gtest)
 
 # What must not allocate, in a program of its own: it replaces operator new with one that counts.
-add_executable(lowlatency_allocation_tests test_main.cpp allocation_test.cpp)
+add_executable(lowlatency_allocation_tests test_main.cpp test_support.cpp allocation_test.cpp)
 target_link_libraries(lowlatency_allocation_tests PRIVATE libexchange libcommon pthread GTest::gtest)
 
 # One CTest test runs the whole program. The tests share one matching engine, which takes two

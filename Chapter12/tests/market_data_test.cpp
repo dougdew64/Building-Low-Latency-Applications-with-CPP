@@ -74,10 +74,11 @@ namespace {
 }
 
 TEST(MarketDataPublisher, NumbersEachUpdateFromOneInOrder) {
-  Receiver incremental("233.252.15.3", 21001);
+  Receiver incremental("233.252.15.3", LowLatencyTests::testPort(1));
   // Never destroyed: its destructor sleeps for five seconds. It is stopped at the end.
   static auto *const queue = new MEMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
-  static auto *const publisher = new MarketDataPublisher(queue, "lo", "233.252.15.1", 21000, "233.252.15.3", 21001);
+  static auto *const publisher = new MarketDataPublisher(queue, "lo", "233.252.15.1", LowLatencyTests::testPort(0),
+                                                                  "233.252.15.3", LowLatencyTests::testPort(1));
   publisher->start();
 
   // A consistent sequence (the snapshot synthesizer behind the publisher checks it): an order
@@ -104,10 +105,10 @@ TEST(MarketDataPublisher, NumbersEachUpdateFromOneInOrder) {
 }
 
 TEST(SnapshotSynthesizer, ASnapshotHoldsEveryLiveOrderAsItIsNow) {
-  Receiver snapshots("233.252.15.5", 21002);
+  Receiver snapshots("233.252.15.5", LowLatencyTests::testPort(2));
   // Not started: the test feeds it and asks for a snapshot. Never destroyed, as above.
   static auto *const queue = new MDPMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
-  static auto *const synthesizer = new SnapshotSynthesizer(queue, "lo", "233.252.15.5", 21002);
+  static auto *const synthesizer = new SnapshotSynthesizer(queue, "lo", "233.252.15.5", LowLatencyTests::testPort(2));
 
   const std::vector<MEMarketUpdate> incremental = {
       {U::ADD, 1, 0, Side::BUY, 100, 5, 1},      // ticker 0, order 1
@@ -149,11 +150,11 @@ TEST(SnapshotSynthesizer, ASnapshotHoldsEveryLiveOrderAsItIsNow) {
 }
 
 TEST(SnapshotSynthesizer, PublishesASnapshotEveryInterval) {
-  Receiver snapshots("233.252.15.7", 21003);
+  Receiver snapshots("233.252.15.7", LowLatencyTests::testPort(3));
   // A tenth of a second, where the book has a minute. Never destroyed, as above; stopped at the end.
   static auto *const queue = new MDPMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
   static auto *const synthesizer =
-      new SnapshotSynthesizer(queue, "lo", "233.252.15.7", 21003, Common::NANOS_TO_SECS / 10);
+      new SnapshotSynthesizer(queue, "lo", "233.252.15.7", LowLatencyTests::testPort(3), Common::NANOS_TO_SECS / 10);
   synthesizer->start();
   // Each snapshot of an empty book: a start, a clear for each ticker, an end. Three arrive within
   // the second receive() waits only if the interval is a fraction of it: with the book's minute, one.

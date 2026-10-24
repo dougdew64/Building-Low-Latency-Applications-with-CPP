@@ -14,6 +14,7 @@
 #include "common/opt_mem_pool.h"
 #include "market_data/snapshot_synthesizer.h"
 #include "matcher/price_level_table.h"
+#include "test_support.h"
 
 namespace {
   std::atomic<long> allocations{0};
@@ -105,7 +106,7 @@ TEST(Allocations, APriceLevelTableAllocatesNothing) {
 TEST(Allocations, TheSnapshotSynthesizersUpdatesAllocateNothing) {
   // Not started, and never destroyed: its destructor sleeps for five seconds.
   static auto *const queue = new MDPMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
-  static auto *const synthesizer = new SnapshotSynthesizer(queue, "lo", "233.252.15.7", 21003);
+  static auto *const synthesizer = new SnapshotSynthesizer(queue, "lo", "233.252.15.11", LowLatencyTests::testPort(0));
   using U = MarketUpdateType;
   const MDPMarketUpdate add{1, {U::ADD, 1, 0, Side::BUY, 100, 5, 1}};
   const MDPMarketUpdate modify{2, {U::MODIFY, 1, 0, Side::BUY, 100, 3, 1}};
