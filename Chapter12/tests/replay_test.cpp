@@ -45,7 +45,35 @@ namespace {
       request(ClientRequestType::NEW, 2, 20, Side::BUY, 99, 3),
       request(ClientRequestType::NEW, 3, 30, Side::BUY, 100, 2),  // partly fills order 10
       request(ClientRequestType::CANCEL, 2, 20, Side::INVALID, 0, 0),
+      request(ClientRequestType::CANCEL, 2, 20, Side::INVALID, 0, 0),  // already cancelled: rejected, no update
   };
+
+  auto fields(const MEClientResponse &r) {
+    return std::make_tuple(value(r.type_), value(r.client_id_), value(r.ticker_id_), value(r.client_order_id_),
+                           value(r.market_order_id_), value(r.side_), value(r.price_), value(r.exec_qty_),
+                           value(r.leaves_qty_));
+  }
+
+  auto fields(const MEMarketUpdate &u) {
+    return std::make_tuple(value(u.type_), value(u.order_id_), value(u.ticker_id_), value(u.side_), value(u.price_),
+                           value(u.qty_), value(u.priority_));
+  }
+
+  /// kRequests replayed, once, through a fresh engine, as a replay needs. Never destroyed, as the
+  /// shared one (test_support.h).
+  const Replayed &replayedRequests() {
+    static auto *const updates = new MEMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
+    static auto *const responses = new ClientResponseLFQueue(Common::ME_MAX_CLIENT_UPDATES);
+    static auto *const requests = new ClientRequestLFQueue(Common::ME_MAX_CLIENT_UPDATES);
+    static auto *const engine = new MatchingEngine(requests, responses, updates);
+    static const Replayed replayed = [] {
+      auto result = replay(kRequests, *engine, *updates, *responses);
+      EXPECT_EQ(updates->size(), 0u) << "the queues are emptied as it goes";
+      EXPECT_EQ(responses->size(), 0u);
+      return result;
+    }();
+    return replayed;
+  }
 }
 
 TEST(RequestRecording, ReadsBackWhatWasRecordedInOrder) {
@@ -179,8 +207,10 @@ TEST(RequestRecording, AnEmptyRecordingHasNoRequests) {
   EXPECT_TRUE(recording.requests.empty());
 }
 
-// The matcher's own loop records each request it processes, in order (exchange_main --record).
-TEST(RequestRecording, TheRunningMatcherRecordsWhatItProcesses) {
+// The matcher's own loop records each request it processes, in order (exchange_main --record), and
+// what it does live, the updates it publishes and the responses it sends to clients, is exactly what
+// the replay of its recording does: what a step says a request did, the live exchange did.
+TEST(RequestRecording, TheRunningMatcherRecordsWhatItProcessesAndDoesWhatItsReplayDoes) {
   // A fresh engine with a recorder, both never destroyed: the engine's thread runs on (its threads
   // are never joined, a known issue) and destroying an engine sleeps for a second.
   static auto *const updates = new MEMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
@@ -196,7 +226,15 @@ TEST(RequestRecording, TheRunningMatcherRecordsWhatItProcesses) {
     requests->updateWriteIndex();
   }
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
-  while (readRecording("engine.rec").requests.size() < kRequests.size() && std::chrono::steady_clock::now() < deadline) {
+  const auto &replayed = replayedRequests();
+  size_t replayed_responses = 0;
+  for (const auto &step : replayed.steps) {
+    replayed_responses += step.responses.size();
+  }
+  // Recorded before it is processed, so wait for what processing sends too.
+  while ((readRecording("engine.rec").requests.size() < kRequests.size() || updates->size() < replayed.updates.size() ||
+          responses->size() < replayed_responses) &&
+         std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds{10});
   }
   engine->stop();
@@ -206,16 +244,23 @@ TEST(RequestRecording, TheRunningMatcherRecordsWhatItProcesses) {
   for (size_t i = 0; i < kRequests.size(); ++i) {
     EXPECT_EQ(fields(recording.requests[i]), fields(kRequests[i])) << "request " << i;
   }
+  // The replay is of kRequests, which the recording was just shown to hold.
+  ASSERT_EQ(updates->size(), replayed.updates.size());
+  for (const auto &expected : replayed.updates) {
+    EXPECT_EQ(fields(*updates->getNextToRead()), fields(expected.me_market_update_)) << "update " << expected.seq_num_;
+    updates->updateReadIndex();
+  }
+  ASSERT_EQ(responses->size(), replayed_responses);
+  for (size_t i = 0; i < replayed.steps.size(); ++i) {
+    for (const auto &expected : replayed.steps[i].responses) {
+      EXPECT_EQ(fields(*responses->getNextToRead()), fields(expected)) << "request " << i + 1;
+      responses->updateReadIndex();
+    }
+  }
 }
 
 TEST(Replay, GivesTheMarketUpdatesTheRequestsMakeNumberedFromOne) {
-  // A fresh engine, as a replay needs. Never destroyed, as the shared one (test_support.h).
-  static auto *const updates = new MEMarketUpdateLFQueue(Common::ME_MAX_MARKET_UPDATES);
-  static auto *const responses = new ClientResponseLFQueue(Common::ME_MAX_CLIENT_UPDATES);
-  static auto *const requests = new ClientRequestLFQueue(Common::ME_MAX_CLIENT_UPDATES);
-  static auto *const engine = new MatchingEngine(requests, responses, updates);
-
-  const auto published = replay(kRequests, *engine, *updates, *responses);
+  const auto &published = replayedRequests().updates;
   using U = MarketUpdateType;
   const std::vector<std::tuple<size_t, U, OrderId, Side, Price, Qty>> expected = {
       {1, U::ADD, 1, Side::SELL, 100, 5},      // order 10, market order id 1
@@ -232,8 +277,78 @@ TEST(Replay, GivesTheMarketUpdatesTheRequestsMakeNumberedFromOne) {
               expected[i])
         << "update " << i;
   }
-  EXPECT_EQ(updates->size(), 0u) << "the queues are emptied as it goes";
-  EXPECT_EQ(responses->size(), 0u);
+}
+
+// Each step is exactly its request's doing: the updates it made, by number, and the responses the
+// matcher sent to clients for it, in the order sent. A request that made no update says where the
+// next one starts.
+TEST(Replay, EachStepIsWhatItsRequestDid) {
+  const auto &steps = replayedRequests().steps;
+  using R = ClientResponseType;
+  using Response = std::tuple<R, ClientId, TickerId, OrderId, OrderId, Side, Price, Qty, Qty>;
+  // (type, client, ticker, client's order id, market order id, side, price, executed, leaves)
+  const std::vector<std::tuple<uint64_t, uint32_t, std::vector<Response>>> expected = {
+      {1, 1, {{R::ACCEPTED, 1, 1, 10, 1, Side::SELL, 100, 0, 5}}},
+      {2, 1, {{R::ACCEPTED, 2, 1, 20, 2, Side::BUY, 99, 0, 3}}},
+      // The incoming order is accepted, then each side of the trade is told of its fill: the
+      // incoming order first, then the resting one, at the resting order's price.
+      {3, 2, {{R::ACCEPTED, 3, 1, 30, 3, Side::BUY, 100, 0, 2},
+              {R::FILLED, 3, 1, 30, 3, Side::BUY, 100, 2, 0},
+              {R::FILLED, 1, 1, 10, 1, Side::SELL, 100, 2, 3}}},
+      {5, 1, {{R::CANCELED, 2, 1, 20, 2, Side::BUY, 99, Qty_INVALID, 3}}},
+      {6, 0, {{R::CANCEL_REJECTED, 2, 1, 20, OrderId_INVALID, Side::INVALID, Price_INVALID, Qty_INVALID, Qty_INVALID}}},
+  };
+  ASSERT_EQ(steps.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    const auto &[first, count, responses] = expected[i];
+    EXPECT_EQ(steps[i].first_update, first) << "request " << i + 1;
+    EXPECT_EQ(steps[i].update_count, count) << "request " << i + 1;
+    ASSERT_EQ(steps[i].responses.size(), responses.size()) << "request " << i + 1;
+    for (size_t j = 0; j < responses.size(); ++j) {
+      EXPECT_EQ(fields(steps[i].responses[j]), responses[j]) << "request " << i + 1 << ", response " << j;
+    }
+  }
+}
+
+TEST(Replay, TheStepsFileIsAHeaderThenEachRequestAndWhatItDid) {
+  const std::vector<MEClientRequest> requests = {request(ClientRequestType::NEW, 1, 10, Side::SELL, 100, 5),
+                                                 request(ClientRequestType::CANCEL, 1, 99, Side::INVALID, 0, 0)};
+  const MEClientResponse accepted{ClientResponseType::ACCEPTED, 1, 1, 10, 1, Side::SELL, 100, 0, 5};
+  const MEClientResponse rejected{ClientResponseType::CANCEL_REJECTED, 1, 1, 99, OrderId_INVALID, Side::INVALID,
+                                  Price_INVALID, Qty_INVALID, Qty_INVALID};
+  const std::vector<Step> steps = {{.first_update = 1, .update_count = 1, .responses = {accepted}},
+                                   {.first_update = 2, .update_count = 0, .responses = {rejected}}};
+  ASSERT_FALSE(writeSteps("steps.dat", "runs/a.rec", requests, steps));
+  const auto bytes = readFile("steps.dat");
+  constexpr size_t kStep = sizeof(MEClientRequest) + 8 + 4 + 4;
+  ASSERT_EQ(bytes.size(), 8 + 4 + 10 + 2 * (kStep + sizeof(MEClientResponse)));
+  EXPECT_EQ(bytes.substr(0, 8), "LLSTEP01");
+  uint32_t length = 0;
+  std::memcpy(&length, bytes.data() + 8, sizeof(length));
+  EXPECT_EQ(length, 10u);
+  EXPECT_EQ(bytes.substr(12, 10), "runs/a.rec");
+  size_t at = 22;
+  for (size_t i = 0; i < requests.size(); ++i) {
+    EXPECT_EQ(std::memcmp(bytes.data() + at, &requests[i], sizeof(MEClientRequest)), 0) << "request " << i;
+    uint64_t first = 0;
+    uint32_t count = 0, responses = 0;
+    std::memcpy(&first, bytes.data() + at + sizeof(MEClientRequest), 8);
+    std::memcpy(&count, bytes.data() + at + sizeof(MEClientRequest) + 8, 4);
+    std::memcpy(&responses, bytes.data() + at + sizeof(MEClientRequest) + 12, 4);
+    EXPECT_EQ(first, steps[i].first_update) << "request " << i;
+    EXPECT_EQ(count, steps[i].update_count) << "request " << i;
+    ASSERT_EQ(responses, 1u) << "request " << i;
+    EXPECT_EQ(std::memcmp(bytes.data() + at + kStep, steps[i].responses.data(), sizeof(MEClientResponse)), 0) << "request " << i;
+    at += kStep + sizeof(MEClientResponse);
+  }
+  // A step missing for a request is refused, not written short.
+  const auto mismatched = writeSteps("short.dat", "a.rec", requests, {steps[0]});
+  ASSERT_TRUE(mismatched);
+  EXPECT_NE(mismatched->find("2 requests but 1 steps"), std::string::npos) << *mismatched;
+  EXPECT_TRUE(writeSteps("no-such-directory/s.dat", "a.rec", requests, steps));
+  const auto full = writeSteps("/dev/full", "a.rec", requests, steps);
+  ASSERT_TRUE(full);
+  EXPECT_NE(full->find("can't write /dev/full"), std::string::npos) << *full;
 }
 
 TEST(Replay, TheMarketDataFileIsAHeaderThenTheUpdatesBytes) {

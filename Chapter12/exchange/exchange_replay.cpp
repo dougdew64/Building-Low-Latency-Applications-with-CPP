@@ -1,9 +1,11 @@
 // Fillscope's fork: replays a recording of the exchange's requests (exchange_main --record) through a
 // fresh matching engine, with no clients and no network (exchange/matcher/replay.h).
 //
-//   exchange_replay RECORDING [MARKET_DATA_FILE] [--publish GROUP:PORT] [--self-stop] [--interval-ms MS]
+//   exchange_replay RECORDING [MARKET_DATA_FILE] [--steps FILE] [--publish GROUP:PORT] [--self-stop] [--interval-ms MS]
 //
 // MARKET_DATA_FILE: write the market data the replay publishes to this file.
+// --steps FILE: write what each request did to this file: the updates it made and the responses the
+//   matcher sent to clients for it (replay.h has the format).
 // After each request the replay calls the lockstep anchor (matcher/lockstep_anchor.h), where a
 // debugger stops.
 // --publish GROUP:PORT: first send that request's market updates on this multicast group (an IPv4
@@ -14,7 +16,7 @@
 // --interval-ms MS: wait this long (up to an hour) after each request, to watch it run without a
 //   debugger.
 //
-// One of MARKET_DATA_FILE and --publish is needed.
+// At least one of MARKET_DATA_FILE, --steps and --publish is needed.
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -35,7 +37,7 @@
 
 namespace {
   constexpr const char *kUsage =
-      "usage: exchange_replay RECORDING [MARKET_DATA_FILE] [--publish GROUP:PORT] [--self-stop] [--interval-ms MS]";
+      "usage: exchange_replay RECORDING [MARKET_DATA_FILE] [--steps FILE] [--publish GROUP:PORT] [--self-stop] [--interval-ms MS]";
 
   /// A whole number from 0 to `max`, all of `text` digits (no sign, no spaces, not empty).
   auto parseNumber(const std::string &text, long max) -> std::optional<long> {
@@ -53,6 +55,7 @@ namespace {
   struct Options {
     std::string recording;
     std::optional<std::string> market_data_file;
+    std::optional<std::string> steps_file;
     std::optional<std::string> group;
     int port = 0;
     bool self_stop = false;
@@ -80,6 +83,8 @@ namespace {
         }
         options.group = value.substr(0, colon);
         options.port = static_cast<int>(*port);
+      } else if (arg == "--steps" && i + 1 < argc && !options.steps_file) {
+        options.steps_file = argv[++i];
       } else if (arg == "--interval-ms" && i + 1 < argc) {
         const auto interval = parseNumber(argv[++i], 3'600'000);  // up to an hour
         if (!interval) {
@@ -92,7 +97,7 @@ namespace {
         return std::nullopt;
       }
     }
-    if (positionals == 0 || (positionals == 1 && !options.group)) {
+    if (positionals == 0 || (positionals == 1 && !options.group && !options.steps_file)) {
       return std::nullopt;
     }
     options.recording = *positional[0];
@@ -148,7 +153,8 @@ int main(int argc, char **argv) {
       std::this_thread::sleep_for(std::chrono::milliseconds{options->interval_ms});
     }
   };
-  const auto published = Exchange::replay(recording.requests, *engine, *updates, *responses, after_each);
+  const auto replayed = Exchange::replay(recording.requests, *engine, *updates, *responses, after_each);
+  const auto &published = replayed.updates;
 
   if (options->market_data_file) {
     if (const auto error = Exchange::writeMarketData(*options->market_data_file, options->recording, published)) {
@@ -156,8 +162,15 @@ int main(int argc, char **argv) {
       return 1;
     }
   }
+  if (options->steps_file) {
+    if (const auto error = Exchange::writeSteps(*options->steps_file, options->recording, recording.requests, replayed.steps)) {
+      std::cerr << "exchange_replay: " << *error << std::endl;
+      return 1;
+    }
+  }
   std::cout << "exchange_replay: " << recording.requests.size() << " requests, " << published.size() << " market updates"
             << (options->market_data_file ? ", written to " + *options->market_data_file : std::string{})
+            << (options->steps_file ? ", steps written to " + *options->steps_file : std::string{})
             << (socket ? ", published to " + *options->group + ":" + std::to_string(options->port) : std::string{})
             << std::endl;
   return 0;
