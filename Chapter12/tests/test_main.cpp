@@ -18,6 +18,12 @@ extern "C" const char *__lsan_default_suppressions() {
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
+  // A child running this program again (LowLatencyTests::kChildMarker) is started in its parent's
+  // directory, and stays there: one of its own would be left behind, since a child that tests a stop
+  // ends without returning here.
+  if (std::getenv("LOWLATENCY_TESTS_CHILD") != nullptr) {
+    return RUN_ALL_TESTS();
+  }
   std::string directory = (std::filesystem::temp_directory_path() / "lowlatency-tests-XXXXXX").string();
   if (mkdtemp(directory.data()) == nullptr || chdir(directory.c_str()) != 0) {
     std::cerr << "lowlatency_tests: can't make and enter a directory for the logs in " << directory << '\n';

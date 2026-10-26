@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "matcher/lockstep_anchor.h"
+#include "test_support.h"
 
 #include <spawn.h>
 #include <sys/ptrace.h>
@@ -51,6 +52,8 @@ TEST(LockstepAnchor, KnowsWhetherThisProcessIsTraced) {
   }
   std::string marker = "LOWLATENCY_TRACED_CHILD=1";
   env.push_back(marker.data());
+  std::string child_marker = LowLatencyTests::kChildMarker;
+  env.push_back(child_marker.data());
   env.push_back(nullptr);
   pid_t child = 0;
   ASSERT_EQ(::posix_spawn(&child, program.c_str(), nullptr, nullptr, argv, env.data()), 0);

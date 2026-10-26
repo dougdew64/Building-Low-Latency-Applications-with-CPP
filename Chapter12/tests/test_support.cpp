@@ -61,6 +61,8 @@ namespace LowLatencyTests {
     }
     std::string added = marker;
     env.push_back(added.data());
+    std::string child_marker = kChildMarker;
+    env.push_back(child_marker.data());
     env.push_back(nullptr);
     pid_t child = 0;
     int status = 0;

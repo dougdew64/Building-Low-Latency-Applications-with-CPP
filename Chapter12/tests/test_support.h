@@ -23,6 +23,11 @@ namespace LowLatencyTests {
   auto takeResponses() -> std::vector<Exchange::MEClientResponse>;
   auto takeUpdates() -> std::vector<Exchange::MEMarketUpdate>;
 
+  // In the environment of every child that runs this program again (runInChild, and the lockstep
+  // anchor's test): the child stays in its parent's directory for the logs, rather than making one of
+  // its own, which it would leave behind when it ends without returning from main.
+  inline constexpr const char *kChildMarker = "LOWLATENCY_TESTS_CHILD=1";
+
   // Runs one test of this program again in a child, with `marker` ("NAME=VALUE") added to its
   // environment, and returns its wait status, or -1 if it couldn't be started. A test that needs a
   // process of its own (to set a limit on it, or to see it exit) is the child when its marker is
