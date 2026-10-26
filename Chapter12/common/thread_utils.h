@@ -20,20 +20,20 @@ namespace Common {
 
   /// Creates a thread instance, sets affinity on it, assigns it a name and
   /// passes the function to be run on that thread as well as the arguments to the function.
+  /// Fillscope's fork: the thread gets its own copies of the function, its arguments and the name,
+  /// as std::thread's would. The book's gave it references into this frame and slept a second,
+  /// hoping the thread had used them by then.
   template<typename T, typename... A>
   inline auto createAndStartThread(int core_id, const std::string &name, T &&func, A &&... args) noexcept {
-    auto t = new std::thread([&]() {
+    auto t = new std::thread([core_id, name, func = std::forward<T>(func), ... args = std::forward<A>(args)]() mutable {
       if (core_id >= 0 && !setThreadCore(core_id)) {
         std::cerr << "Failed to set core affinity for " << name << " " << pthread_self() << " to " << core_id << std::endl;
         exit(EXIT_FAILURE);
       }
       std::cerr << "Set core affinity for " << name << " " << pthread_self() << " to " << core_id << std::endl;
 
-      std::forward<T>(func)((std::forward<A>(args))...);
+      std::move(func)(std::move(args)...);
     });
-
-    using namespace std::literals::chrono_literals;
-    std::this_thread::sleep_for(1s);
 
     return t;
   }

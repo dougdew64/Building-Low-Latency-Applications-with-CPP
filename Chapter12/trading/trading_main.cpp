@@ -1,4 +1,8 @@
+#include <chrono>
 #include <csignal>
+#include <cstdlib>
+#include <cstring>
+#include <thread>
 
 #include "strategy/trade_engine.h"
 #include "order_gw/order_gateway.h"
@@ -16,16 +20,27 @@ Trading::OrderGateway *order_gateway = nullptr;
 /// ./trading_main CLIENT_ID ALGO_TYPE [CLIP_1 THRESH_1 MAX_ORDER_SIZE_1 MAX_POS_1 MAX_LOSS_1] [CLIP_2 THRESH_2 MAX_ORDER_SIZE_2 MAX_POS_2 MAX_LOSS_2] ...
 int main(int argc, char **argv) {
   const std::string usage = std::string("USAGE trading_main CLIENT_ID ALGO_TYPE [CLIP_1 THRESH_1 MAX_ORDER_SIZE_1 MAX_POS_1 MAX_LOSS_1] [CLIP_2 THRESH_2 MAX_ORDER_SIZE_2 MAX_POS_2 MAX_LOSS_2] ... ") +
-                            Common::kEndpointsUsage;
+                            Common::kEndpointsUsage + " [--warm-up-seconds SECONDS] (SECONDS from 0 to 3600; default 10)";
   // Fillscope's fork: where the exchange is (common/endpoints.h; the book's addresses by default),
-  // given anywhere on the command line; the other arguments are read as before, in order.
+  // and how long the client waits after starting before it trades (the book's 10 s by default, so a
+  // test need not wait as long), given anywhere on the command line; the other arguments are read
+  // as before, in order.
   Common::Endpoints endpoints;
+  double warm_up_seconds = 10;
   std::vector<char *> positional{argv[0]};
   for (int i = 1; i < argc; ++i) {
     if (const int took = Common::parseEndpointOption(argc, argv, i, endpoints); took < 0) {
       FATAL(usage);
     } else if (took > 0) {
       i += took - 1;
+    } else if (std::strcmp(argv[i], "--warm-up-seconds") == 0) {
+      char *end = nullptr;
+      const double seconds = i + 1 < argc ? std::strtod(argv[i + 1], &end) : -1;
+      if (end == nullptr || end == argv[i + 1] || *end != '\0' || !(seconds >= 0 && seconds <= 3600)) {
+        FATAL(usage);
+      }
+      warm_up_seconds = seconds;
+      ++i;
     } else {
       positional.push_back(argv[i]);
     }
@@ -92,7 +107,7 @@ int main(int argc, char **argv) {
   market_data_consumer = new Trading::MarketDataConsumer(client_id, &market_updates, mkt_data_iface, snapshot_ip, snapshot_port, incremental_ip, incremental_port);
   market_data_consumer->start();
 
-  usleep(10 * 1000 * 1000);
+  std::this_thread::sleep_for(std::chrono::duration<double>(warm_up_seconds));
 
   trade_engine->initLastEventTime();
 

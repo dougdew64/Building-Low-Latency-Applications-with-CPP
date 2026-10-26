@@ -35,6 +35,9 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   exchange publishes a snapshot (the book's 60 s by default; from 0.001 to 1,000,000), so a test of recovering from a
   snapshot need not wait a minute; the snapshot synthesizer and the market data publisher take it
   as a constructor argument with that default. Without arguments the exchange runs as before.
+  `trading_main --warm-up-seconds SECONDS` (anywhere on its command line; from 0 to 3600) sets how
+  long the client waits after starting before it trades, the book's 10 s by default, so a test
+  need not wait as long.
 - **Options for where the programs meet:** `exchange_main` and `trading_main` both take
   `--order-port PORT`, `--snapshot GROUP:PORT` and `--incremental GROUP:PORT`
   (`common/endpoints.h`; `trading_main` takes them anywhere on its command line, and reads its
@@ -124,6 +127,13 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     latency the book measures and can hang the order server and the matcher on each other's full
     queues). The loggers' queues are the same queue, so a logger 8,388,608 values behind (each
     character of a message is one, and each number) stops the program too.
+  - A new thread could read freed stack. `createAndStartThread()` (`common/thread_utils.h`) gave
+    the thread references to the function, its arguments and the thread's name, all in the
+    caller's frame, then slept a second so the thread would have used them before the call
+    returned; a thread not scheduled within the second read them after they were gone (under
+    AddressSanitizer, without the sleep: `stack-use-after-scope`). The thread now gets its own
+    copies, as `std::thread`'s would, and the call returns at once. The second was paid for every
+    thread: the exchange took about 9 s to open its port, and now takes about one.
 
 **Known issues,** not fixed (yet):
 - **A book holds at most 255 price levels at once.** Its pool of levels has 256 blocks, and taking
@@ -131,7 +141,7 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   deep book of real prices could need more.
 - **Threads are never joined.** `createAndStartThread()` allocates each `std::thread` with `new`,
   and the components' `start()` functions drop the pointer. (The tests tell LeakSanitizer to
-  ignore these allocations.) It also sleeps a second after starting each thread.
+  ignore these allocations.)
 - **Shutdown is slow:** each `MEOrderBook`'s destructor clears its 2 GB table of client orders,
   which takes seconds per book.
 - **A client has at most 1,048,576 order ids.** The matcher's table of a client's orders is indexed
