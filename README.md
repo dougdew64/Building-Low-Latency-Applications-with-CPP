@@ -134,6 +134,20 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     AddressSanitizer, without the sleep: `stack-use-after-scope`). The thread now gets its own
     copies, as `std::thread`'s would, and the call returns at once. The second was paid for every
     thread: the exchange took about 9 s to open its port, and now takes about one.
+  - The trading client's copy of the books (`trading/strategy/market_order_book.*`), whose best
+    bid and ask the market maker and the liquidity taker trade on, had three defects
+    (`tests/market_order_book_test.cpp`). It recomputed a side's best price only if the update's
+    price was at least as good as that side's best order, decided before the update was applied:
+    on an empty side there was none, so the first order there left the best unset until an update
+    at that order's price or better came, and until then the strategies wouldn't trade the ticker. A clear (which starts a client's recovery
+    from a snapshot) has no side, so it left the old best prices standing, and it also left the
+    book's table of levels by price pointing at the levels it freed, so an order at one of those
+    prices after the clear joined a freed level, outside the book. Now an update on an empty side
+    and a clear recompute the best, and a clear empties the table. And the book's two tables
+    (orders by id, levels by price) were never initialized, so a book made in reused memory held
+    stale pointers; the client makes its books once, in fresh memory, which hid it. Both now
+    start empty. Fillscope checks every order the two strategies send against their rules, on
+    the real exchange (its `strategy_system_tests`).
 
 **Known issues,** not fixed (yet):
 - **A book holds at most 255 price levels at once.** Its pool of levels has 256 blocks, and taking

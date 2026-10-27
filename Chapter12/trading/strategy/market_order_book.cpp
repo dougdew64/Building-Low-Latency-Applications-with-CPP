@@ -18,8 +18,12 @@ namespace Trading {
 
   /// Process market data update and update the limit order book.
   auto MarketOrderBook::onMarketUpdate(const Exchange::MEMarketUpdate *market_update) noexcept -> void {
-    const auto bid_updated = (bids_by_price_ && market_update->side_ == Side::BUY && market_update->price_ >= bids_by_price_->price_);
-    const auto ask_updated = (asks_by_price_ && market_update->side_ == Side::SELL && market_update->price_ <= asks_by_price_->price_);
+    // Fillscope's fork: whether the update can change a side's best, decided before it is applied. On
+    // an empty side any update can (the book's code needed a best order to compare with, so the first
+    // order on an empty side left the best unset), and a clear, which has no side, empties both.
+    const auto is_clear = market_update->type_ == Exchange::MarketUpdateType::CLEAR;
+    const auto bid_updated = is_clear || (market_update->side_ == Side::BUY && (!bids_by_price_ || market_update->price_ >= bids_by_price_->price_));
+    const auto ask_updated = is_clear || (market_update->side_ == Side::SELL && (!asks_by_price_ || market_update->price_ <= asks_by_price_->price_));
 
     switch (market_update->type_) {
       case Exchange::MarketUpdateType::ADD: {
@@ -67,6 +71,9 @@ namespace Trading {
         }
 
         bids_by_price_ = asks_by_price_ = nullptr;
+        // Fillscope's fork: the levels are freed, so nothing may find them by price either; the book's
+        // code left the table pointing at them, and an order at such a price joined a freed level.
+        price_orders_at_price_.fill(nullptr);
       }
         break;
       case Exchange::MarketUpdateType::INVALID:

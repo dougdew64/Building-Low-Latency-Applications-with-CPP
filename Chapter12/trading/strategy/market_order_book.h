@@ -76,7 +76,9 @@ namespace Trading {
     TradeEngine *trade_engine_ = nullptr;
 
     /// Hash map from OrderId -> MarketOrder.
-    OrderHashMap oid_to_order_;
+    /// Fillscope's fork: starts empty ({}): left uninitialized, a book made in reused memory had stale
+    /// pointers in it.
+    OrderHashMap oid_to_order_{};
 
     /// Memory pool to manage MarketOrdersAtPrice objects.
     MemPool<MarketOrdersAtPrice> orders_at_price_pool_;
@@ -86,7 +88,8 @@ namespace Trading {
     MarketOrdersAtPrice *asks_by_price_ = nullptr;
 
     /// Hash map from Price -> MarketOrdersAtPrice.
-    OrdersAtPriceHashMap price_orders_at_price_;
+    /// Fillscope's fork: starts empty ({}), as oid_to_order_ does.
+    OrdersAtPriceHashMap price_orders_at_price_{};
 
     /// Memory pool to manage MarketOrder objects.
     MemPool<MarketOrder> order_pool_;
