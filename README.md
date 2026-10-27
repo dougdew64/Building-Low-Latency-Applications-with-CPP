@@ -71,6 +71,13 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   format is in `exchange/matcher/replay.h`. It is what lets Fillscope step through a recording a
   request at a time and say who was told what. The running matcher's own updates and responses for
   the same requests are the same, which the tests check.
+- **A planted slicer:** a fourth strategy, `trading_main CLIENT SLICER --slice TICKER BUY|SELL TOTAL
+  PIECE GAP`, which sends a large order in pieces, each a set number of market updates on its ticker
+  after the one before, priced to take; `--gap-jitter` and `--size-spread` vary the gaps and the
+  sizes, from a seeded generator, and several `--slice` options, each on a ticker of its own, are
+  worked at once (`trading/strategy/slicer.h`). It is there for Fillscope to find in the market
+  data. The trade engine takes the orders as a new, optional argument; the book's strategies are
+  unchanged.
 - **Who sent what:** `exchange_replay RECORDING --truth FILE` also writes the replay's truth: every
   order accepted, with its client, and every trade, with the clients and order ids of the incoming
   and the resting order, from the matcher's responses; the format is in `exchange/matcher/replay.h`.

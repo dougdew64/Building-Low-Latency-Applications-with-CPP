@@ -130,7 +130,8 @@ namespace Common {
     RANDOM = 1,
     MAKER = 2,
     TAKER = 3,
-    MAX = 4
+    SLICER = 4,  // Fillscope's fork: trading/strategy/slicer.h
+    MAX = 5
   };
 
   inline auto algoTypeToString(AlgoType type) -> std::string {
@@ -141,6 +142,8 @@ namespace Common {
         return "MAKER";
       case AlgoType::TAKER:
         return "TAKER";
+      case AlgoType::SLICER:
+        return "SLICER";
       case AlgoType::INVALID:
         return "INVALID";
       case AlgoType::MAX:

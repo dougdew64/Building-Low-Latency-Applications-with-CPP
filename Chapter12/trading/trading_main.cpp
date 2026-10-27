@@ -9,6 +9,7 @@
 #include "market_data/market_data_consumer.h"
 
 #include "common/endpoints.h"
+#include "strategy/slicer.h"
 #include "common/logging.h"
 
 /// Main components.
@@ -20,12 +21,14 @@ Trading::OrderGateway *order_gateway = nullptr;
 /// ./trading_main CLIENT_ID ALGO_TYPE [CLIP_1 THRESH_1 MAX_ORDER_SIZE_1 MAX_POS_1 MAX_LOSS_1] [CLIP_2 THRESH_2 MAX_ORDER_SIZE_2 MAX_POS_2 MAX_LOSS_2] ...
 int main(int argc, char **argv) {
   const std::string usage = std::string("USAGE trading_main CLIENT_ID ALGO_TYPE [CLIP_1 THRESH_1 MAX_ORDER_SIZE_1 MAX_POS_1 MAX_LOSS_1] [CLIP_2 THRESH_2 MAX_ORDER_SIZE_2 MAX_POS_2 MAX_LOSS_2] ... ") +
-                            Common::kEndpointsUsage + " [--warm-up-seconds SECONDS] (SECONDS from 0 to 3600; default 10)";
+                            Common::kEndpointsUsage + " [--warm-up-seconds SECONDS] (SECONDS from 0 to 3600; default 10)" +
+                            Trading::kSliceUsage + " (SLICER only, which needs a --slice; trading/strategy/slicer.h)";
   // Fillscope's fork: where the exchange is (common/endpoints.h; the book's addresses by default),
   // and how long the client waits after starting before it trades (the book's 10 s by default, so a
   // test need not wait as long), given anywhere on the command line; the other arguments are read
   // as before, in order.
   Common::Endpoints endpoints;
+  Trading::SliceOptions slice;
   double warm_up_seconds = 10;
   std::vector<char *> positional{argv[0]};
   for (int i = 1; i < argc; ++i) {
@@ -33,6 +36,10 @@ int main(int argc, char **argv) {
       FATAL(usage);
     } else if (took > 0) {
       i += took - 1;
+    } else if (const int sliced = Trading::parseSliceOption(argc, argv, i, slice); sliced < 0) {
+      FATAL(usage);
+    } else if (sliced > 0) {
+      i += sliced - 1;
     } else if (std::strcmp(argv[i], "--warm-up-seconds") == 0) {
       char *end = nullptr;
       const double seconds = i + 1 < argc ? std::strtod(argv[i + 1], &end) : -1;
@@ -57,6 +64,21 @@ int main(int argc, char **argv) {
   srand(client_id);
 
   const auto algo_type = stringToAlgoType(argv[2]);
+  // Fillscope's fork: a slicer needs its order, and only a slicer takes one.
+  if ((algo_type == AlgoType::SLICER) != !slice.orders.empty() || (slice.any && algo_type != AlgoType::SLICER)) {
+    FATAL(usage);
+  }
+  const auto slice_orders = Trading::sliceOrders(slice, client_id);
+  if (algo_type == AlgoType::SLICER) {
+    if (const auto error = Trading::slicesError(slice_orders)) {
+      FATAL("trading_main: " + *error);
+    }
+    if (slice.plan_file) {
+      if (const auto error = Trading::writeSlicePlans(*slice.plan_file, slice_orders)) {
+        FATAL("trading_main: " + *error);
+      }
+    }
+  }
 
   logger = new Common::Logger("trading_main_" + std::to_string(client_id) + ".log");
 
@@ -86,7 +108,8 @@ int main(int argc, char **argv) {
                                           ticker_cfg,
                                           &client_requests,
                                           &client_responses,
-                                          &market_updates);
+                                          &market_updates,
+                                          slice_orders);
   trade_engine->start();
 
   const std::string order_gw_ip = "127.0.0.1";

@@ -6,7 +6,8 @@ namespace Trading {
                            const TradeEngineCfgHashMap &ticker_cfg,
                            Exchange::ClientRequestLFQueue *client_requests,
                            Exchange::ClientResponseLFQueue *client_responses,
-                           Exchange::MEMarketUpdateLFQueue *market_updates)
+                           Exchange::MEMarketUpdateLFQueue *market_updates,
+                           const std::vector<SliceCfg> &slice_orders)
       : client_id_(client_id), outgoing_ogw_requests_(client_requests), incoming_ogw_responses_(client_responses),
         incoming_md_updates_(market_updates), logger_("trading_engine_" + std::to_string(client_id) + ".log"),
         feature_engine_(&logger_),
@@ -31,6 +32,9 @@ namespace Trading {
       mm_algo_ = new MarketMaker(&logger_, this, &feature_engine_, &order_manager_, ticker_cfg);
     } else if (algo_type == AlgoType::TAKER) {
       taker_algo_ = new LiquidityTaker(&logger_, this, &feature_engine_, &order_manager_, ticker_cfg);
+    } else if (algo_type == AlgoType::SLICER) {
+      ASSERT(!slicesError(slice_orders), "A slicer needs orders it can slice.");
+      slicer_algo_ = new Slicer(&logger_, this, slice_orders);
     }
 
     for (TickerId i = 0; i < ticker_cfg.size(); ++i) {
@@ -49,6 +53,7 @@ namespace Trading {
 
     delete mm_algo_; mm_algo_ = nullptr;
     delete taker_algo_; taker_algo_ = nullptr;
+    delete slicer_algo_; slicer_algo_ = nullptr;
 
     for (auto &order_book: ticker_order_book_) {
       delete order_book;

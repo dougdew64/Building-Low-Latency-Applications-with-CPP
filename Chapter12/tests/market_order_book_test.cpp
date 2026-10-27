@@ -12,8 +12,8 @@
 
 #include <memory>
 
+#include "client_engine.h"
 #include "strategy/market_order_book.h"
-#include "strategy/trade_engine.h"
 
 using namespace Trading;
 using Common::Side;
@@ -21,26 +21,12 @@ using Exchange::MarketUpdateType;
 using Exchange::MEMarketUpdate;
 
 namespace {
-  // Never destroyed, and never started: destroying a trade engine sleeps for a second. The book
-  // tells it of each change, as the client's do, and it tells its (random) strategy, which sends
-  // nothing in response.
-  struct Engine {
-    Exchange::ClientRequestLFQueue requests{ME_MAX_CLIENT_UPDATES};
-    Exchange::ClientResponseLFQueue responses{ME_MAX_CLIENT_UPDATES};
-    Exchange::MEMarketUpdateLFQueue updates{ME_MAX_MARKET_UPDATES};
-    Common::Logger logger{"market_order_book_test.log"};
-    TradeEngine engine{1, AlgoType::RANDOM, TradeEngineCfgHashMap{}, &requests, &responses, &updates};
-  };
-
-  auto engine() -> Engine & {
-    static auto *const engine = new Engine;
-    return *engine;
-  }
-
-  // A ticker's book, given to the engine as the client's are.
+  // A ticker's book, given to the shared engine as the client's are; it tells the engine of each
+  // change, and the engine its strategy, which does nothing in response.
   auto book() -> std::unique_ptr<MarketOrderBook> {
-    auto book = std::make_unique<MarketOrderBook>(0, &engine().logger);
-    book->setTradeEngine(&engine().engine);
+    auto &engine = LowLatencyTests::clientEngine();
+    auto book = std::make_unique<MarketOrderBook>(0, &engine.logger);
+    book->setTradeEngine(&engine.engine);
     return book;
   }
 

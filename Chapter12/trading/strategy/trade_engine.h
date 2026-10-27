@@ -21,6 +21,7 @@
 
 #include "market_maker.h"
 #include "liquidity_taker.h"
+#include "slicer.h"
 
 namespace Trading {
   class TradeEngine {
@@ -30,7 +31,8 @@ namespace Trading {
                 const TradeEngineCfgHashMap &ticker_cfg,
                 Exchange::ClientRequestLFQueue *client_requests,
                 Exchange::ClientResponseLFQueue *client_responses,
-                Exchange::MEMarketUpdateLFQueue *market_updates);
+                Exchange::MEMarketUpdateLFQueue *market_updates,
+                const std::vector<SliceCfg> &slice_orders = {});  // Fillscope's fork: the orders to slice, for SLICER
 
     ~TradeEngine();
 
@@ -134,6 +136,7 @@ namespace Trading {
     /// Market making or liquidity taking algorithm instance - only one of these is created in a single trade engine instance.
     MarketMaker *mm_algo_ = nullptr;
     LiquidityTaker *taker_algo_ = nullptr;
+    Slicer *slicer_algo_ = nullptr;  // Fillscope's fork
 
     /// Default methods to initialize the function wrappers.
     auto defaultAlgoOnOrderBookUpdate(TickerId ticker_id, Price price, Side side, MarketOrderBook *) noexcept -> void {
