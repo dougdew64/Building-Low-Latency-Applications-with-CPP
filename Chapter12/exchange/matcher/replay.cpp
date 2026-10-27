@@ -35,6 +35,46 @@ namespace Exchange {
     return replayed;
   }
 
+  auto truthOf(const Replayed &replayed, Truth &truth) -> std::optional<std::string> {
+    truth = {};
+    uint64_t request_number = 0;
+    for (const auto &step : replayed.steps) {
+      ++request_number;
+      std::vector<const MEClientResponse *> fills;
+      for (const auto &response : step.responses) {
+        if (response.type_ == ClientResponseType::ACCEPTED) {
+          truth.orders.push_back({response.ticker_id_, response.market_order_id_, response.client_id_});
+        } else if (response.type_ == ClientResponseType::FILLED) {
+          fills.push_back(&response);
+        }
+      }
+      size_t trades = 0;
+      for (uint64_t seq = step.first_update; seq < step.first_update + step.update_count; ++seq) {
+        const auto &update = replayed.updates[seq - 1].me_market_update_;
+        if (update.type_ != MarketUpdateType::TRADE) {
+          continue;
+        }
+        // match() sends the incoming order's fill, then the resting one's, then the trade.
+        if (fills.size() < 2 * trades + 2) {
+          return "request " + std::to_string(request_number) + ": trade " + std::to_string(seq) + " has no fills";
+        }
+        const auto &incoming = *fills[2 * trades];
+        const auto &resting = *fills[2 * trades + 1];
+        if (incoming.exec_qty_ != update.qty_ || resting.exec_qty_ != update.qty_ || incoming.ticker_id_ != update.ticker_id_ ||
+            resting.ticker_id_ != update.ticker_id_) {
+          return "request " + std::to_string(request_number) + ": trade " + std::to_string(seq) + " isn't its fills'";
+        }
+        truth.trades.push_back({seq, incoming.client_id_, incoming.market_order_id_, resting.client_id_, resting.market_order_id_});
+        ++trades;
+      }
+      if (fills.size() != 2 * trades) {
+        return "request " + std::to_string(request_number) + ": " + std::to_string(fills.size()) + " fills for " +
+               std::to_string(trades) + " trades";
+      }
+    }
+    return std::nullopt;
+  }
+
   auto writeMarketData(const std::string &path, const std::string &recording_path,
                        const std::vector<MDPMarketUpdate> &updates) -> std::optional<std::string> {
     std::ofstream out{path, std::ios::binary | std::ios::trunc};
@@ -75,6 +115,38 @@ namespace Exchange {
       write(static_cast<uint32_t>(steps[i].responses.size()));
       out.write(reinterpret_cast<const char *>(steps[i].responses.data()),
                 static_cast<std::streamsize>(steps[i].responses.size() * sizeof(MEClientResponse)));
+    }
+    out.close();
+    if (!out) {
+      return "can't write " + path;
+    }
+    return std::nullopt;
+  }
+
+  auto writeTruth(const std::string &path, const std::string &recording_path, const Truth &truth)
+      -> std::optional<std::string> {
+    std::ofstream out{path, std::ios::binary | std::ios::trunc};
+    if (!out) {
+      return "can't create " + path + ": " + std::strerror(errno);
+    }
+    // Field by field: the structs have padding, which the file doesn't.
+    const auto write = [&out](const auto &value) { out.write(reinterpret_cast<const char *>(&value), sizeof(value)); };
+    out.write(kTruthMagic, sizeof(kTruthMagic));
+    write(static_cast<uint32_t>(recording_path.size()));
+    out.write(recording_path.data(), static_cast<std::streamsize>(recording_path.size()));
+    write(static_cast<uint64_t>(truth.orders.size()));
+    for (const auto &order : truth.orders) {
+      write(order.ticker);
+      write(order.market_order_id);
+      write(order.client);
+    }
+    write(static_cast<uint64_t>(truth.trades.size()));
+    for (const auto &trade : truth.trades) {
+      write(trade.update);
+      write(trade.incoming_client);
+      write(trade.incoming_order_id);
+      write(trade.resting_client);
+      write(trade.resting_order_id);
     }
     out.close();
     if (!out) {

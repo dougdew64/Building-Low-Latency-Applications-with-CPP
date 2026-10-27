@@ -369,3 +369,95 @@ TEST(Replay, TheMarketDataFileIsAHeaderThenTheUpdatesBytes) {
   ASSERT_TRUE(full);
   EXPECT_NE(full->find("can't write /dev/full"), std::string::npos) << *full;
 }
+
+// The truth, from the matcher's responses: each order is its accepted request's client's, and the
+// trade is the incoming order's (client 3's) against the resting one's (client 1's).
+TEST(Replay, TheTruthIsWhoSentEachOrderAndEachSideOfEachTrade) {
+  Truth truth;
+  ASSERT_FALSE(truthOf(replayedRequests(), truth));
+  const std::vector<std::tuple<TickerId, OrderId, ClientId>> orders = {{1, 1, 1}, {1, 2, 2}, {1, 3, 3}};
+  ASSERT_EQ(truth.orders.size(), orders.size());
+  for (size_t i = 0; i < orders.size(); ++i) {
+    EXPECT_EQ(std::make_tuple(truth.orders[i].ticker, truth.orders[i].market_order_id, truth.orders[i].client), orders[i])
+        << "order " << i;
+  }
+  ASSERT_EQ(truth.trades.size(), 1u);
+  const auto &trade = truth.trades[0];
+  EXPECT_EQ(std::make_tuple(trade.update, trade.incoming_client, trade.incoming_order_id, trade.resting_client,
+                            trade.resting_order_id),
+            std::make_tuple(uint64_t{3}, ClientId{3}, OrderId{3}, ClientId{1}, OrderId{1}));
+}
+
+namespace {
+  MEClientResponse fill(ClientId client, OrderId market_order_id, Qty qty) {
+    return {ClientResponseType::FILLED, client, 1, 0, market_order_id, Side::BUY, 100, qty, 0};
+  }
+
+  MDPMarketUpdate trade(size_t seq, Qty qty) {
+    return {seq, {MarketUpdateType::TRADE, OrderId_INVALID, 1, Side::BUY, 100, qty, Priority_INVALID}};
+  }
+}
+
+// One incoming order meeting two resting ones: each trade is paired with its own two fills, in the
+// order the matcher sends them. Fills and trades that don't pair are refused, not guessed at.
+TEST(Replay, EachTradeIsItsOwnFills) {
+  const MEClientResponse accepted{ClientResponseType::ACCEPTED, 7, 1, 70, 5, Side::BUY, 100, 0, 9};
+  Replayed replayed;
+  replayed.updates = {trade(1, 4), {2, {MarketUpdateType::CANCEL, 1, 1, Side::SELL, 100, 4, Priority_INVALID}},
+                      trade(3, 5), {4, {MarketUpdateType::CANCEL, 2, 1, Side::SELL, 100, 5, Priority_INVALID}}};
+  replayed.steps = {{.first_update = 1, .update_count = 4,
+                     .responses = {accepted, fill(7, 5, 4), fill(8, 1, 4), fill(7, 5, 5), fill(9, 2, 5)}}};
+  Truth truth;
+  ASSERT_FALSE(truthOf(replayed, truth));
+  ASSERT_EQ(truth.orders.size(), 1u);
+  EXPECT_EQ(std::make_tuple(truth.orders[0].ticker, truth.orders[0].market_order_id, truth.orders[0].client),
+            std::make_tuple(TickerId{1}, OrderId{5}, ClientId{7}));
+  ASSERT_EQ(truth.trades.size(), 2u);
+  const auto fields = [](const TradeTruth &t) {
+    return std::make_tuple(t.update, t.incoming_client, t.incoming_order_id, t.resting_client, t.resting_order_id);
+  };
+  EXPECT_EQ(fields(truth.trades[0]), std::make_tuple(uint64_t{1}, ClientId{7}, OrderId{5}, ClientId{8}, OrderId{1}));
+  EXPECT_EQ(fields(truth.trades[1]), std::make_tuple(uint64_t{3}, ClientId{7}, OrderId{5}, ClientId{9}, OrderId{2}));
+
+  const auto refused = [&](std::vector<MEClientResponse> responses, const std::string &why) {
+    Replayed broken = replayed;
+    broken.steps[0].responses = std::move(responses);
+    Truth ignored;
+    const auto error = truthOf(broken, ignored);
+    ASSERT_TRUE(error) << why;
+    EXPECT_NE(error->find(why), std::string::npos) << *error;
+  };
+  refused({accepted, fill(7, 5, 4), fill(8, 1, 4), fill(7, 5, 5)}, "request 1: trade 3 has no fills");
+  refused({accepted, fill(7, 5, 4), fill(8, 1, 4), fill(7, 5, 5), fill(9, 2, 5), fill(7, 5, 1)}, "request 1: 5 fills for 2 trades");
+  refused({accepted, fill(7, 5, 4), fill(8, 1, 4), fill(7, 5, 5), fill(9, 2, 4)}, "request 1: trade 3 isn't its fills'");
+}
+
+TEST(Replay, TheTruthFileIsAHeaderThenTheOrdersThenTheTrades) {
+  Truth truth;
+  truth.orders = {{1, 1, 4}, {2, 1, 5}};
+  truth.trades = {{.update = 9, .incoming_client = 5, .incoming_order_id = 1, .resting_client = 4, .resting_order_id = 1}};
+  ASSERT_FALSE(writeTruth("truth.dat", "runs/a.rec", truth));
+  const auto bytes = readFile("truth.dat");
+  ASSERT_EQ(bytes.size(), 8 + 4 + 10 + 8 + 2 * 16 + 8 + 32);
+  EXPECT_EQ(bytes.substr(0, 8), "LLTRUE01");
+  const auto at = [&](size_t offset, auto value) {
+    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+    return value;
+  };
+  EXPECT_EQ(at(8, uint32_t{}), 10u);
+  EXPECT_EQ(bytes.substr(12, 10), "runs/a.rec");
+  EXPECT_EQ(at(22, uint64_t{}), 2u);
+  for (size_t i = 0; i < 2; ++i) {
+    const size_t order = 30 + 16 * i;
+    EXPECT_EQ(std::make_tuple(at(order, uint32_t{}), at(order + 4, uint64_t{}), at(order + 12, uint32_t{})),
+              std::make_tuple(truth.orders[i].ticker, truth.orders[i].market_order_id, truth.orders[i].client))
+        << "order " << i;
+  }
+  EXPECT_EQ(at(62, uint64_t{}), 1u);
+  EXPECT_EQ(std::make_tuple(at(70, uint64_t{}), at(78, uint32_t{}), at(82, uint64_t{}), at(90, uint32_t{}), at(94, uint64_t{})),
+            std::make_tuple(uint64_t{9}, 5u, uint64_t{1}, 4u, uint64_t{1}));
+  EXPECT_TRUE(writeTruth("no-such-directory/t.dat", "a.rec", truth));
+  const auto full = writeTruth("/dev/full", "a.rec", truth);
+  ASSERT_TRUE(full);
+  EXPECT_NE(full->find("can't write /dev/full"), std::string::npos) << *full;
+}
