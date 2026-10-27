@@ -160,7 +160,7 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     (orders by id, levels by price) were never initialized, so a book made in reused memory held
     stale pointers; the client makes its books once, in fresh memory, which hid it. Both now
     start empty. Fillscope checks every order the two strategies send against their rules, on
-    the real exchange (its `strategy_system_tests`).
+    the real exchange (its `session_system_tests`).
 
 **Known issues,** not fixed (yet):
 - **A book holds at most 255 price levels at once.** Its pool of levels has 256 blocks, and taking
