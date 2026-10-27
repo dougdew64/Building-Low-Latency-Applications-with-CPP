@@ -283,6 +283,25 @@ TEST_F(SlicerTest, EachOrderGoesItsOwnWayOnItsOwnTicker) {
   EXPECT_EQ(slicer_->sent(1), 1u);
 }
 
+// Each piece is cancelled as soon as it is accepted, whatever it filled; a fill asks nothing more.
+TEST_F(SlicerTest, APieceIsCancelledAsSoonAsItIsAccepted) {
+  start({cfg(20, 10, 1)});
+  using R = Exchange::ClientResponseType;
+  const Exchange::MEClientResponse accepted{R::ACCEPTED, 1, 1, 1, 7, Side::BUY, 105, 0, 10};
+  slicer_->onOrderUpdate(&accepted);
+  const auto requests = LowLatencyTests::takeRequests();
+  ASSERT_EQ(requests.size(), 1u);
+  EXPECT_EQ(std::make_tuple(value(requests[0].type_), value(requests[0].client_id_), value(requests[0].ticker_id_),
+                            value(requests[0].order_id_), value(requests[0].side_)),
+            std::make_tuple(Exchange::ClientRequestType::CANCEL, ClientId{1}, TickerId{1}, OrderId{1}, Side::BUY));
+  const Exchange::MEClientResponse filled{R::FILLED, 1, 1, 1, 7, Side::BUY, 105, 4, 6};
+  slicer_->onOrderUpdate(&filled);
+  const Exchange::MEClientResponse rejected{R::CANCEL_REJECTED, 1, 1, 1, OrderId_INVALID, Side::INVALID, Price_INVALID,
+                                            Qty_INVALID, Qty_INVALID};
+  slicer_->onOrderUpdate(&rejected);
+  EXPECT_TRUE(LowLatencyTests::takeRequests().empty());
+}
+
 // The plan file: a line a piece, each order's in turn: its ticker, its quantity and its gap.
 TEST(SlicePlan, ItsFileIsALineAPiece) {
   auto other = cfg(15, 10, 4);

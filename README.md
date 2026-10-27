@@ -73,7 +73,8 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
   the same requests are the same, which the tests check.
 - **A planted slicer:** a fourth strategy, `trading_main CLIENT SLICER --slice TICKER BUY|SELL TOTAL
   PIECE GAP`, which sends a large order in pieces, each a set number of market updates on its ticker
-  after the one before, priced to take; `--gap-jitter` and `--size-spread` vary the gaps and the
+  after the one before, priced to take and cancelled as soon as it is accepted, as an
+  immediate-or-cancel order would be; `--gap-jitter` and `--size-spread` vary the gaps and the
   sizes, from a seeded generator, and several `--slice` options, each on a ticker of its own, are
   worked at once (`trading/strategy/slicer.h`). It is there for Fillscope to find in the market
   data. The trade engine takes the orders as a new, optional argument; the book's strategies are

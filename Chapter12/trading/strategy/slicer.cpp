@@ -177,6 +177,13 @@ namespace Trading {
   auto Slicer::onOrderUpdate(const Exchange::MEClientResponse *client_response) noexcept -> void {
     logger_->log("%:% %() % %\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str_),
                  client_response->toString().c_str());
+    if (client_response->type_ != Exchange::ClientResponseType::ACCEPTED) {
+      return;
+    }
+    const Exchange::MEClientRequest cancel{Exchange::ClientRequestType::CANCEL, trade_engine_->clientId(),
+                                           client_response->ticker_id_, client_response->client_order_id_,
+                                           client_response->side_, client_response->price_, client_response->leaves_qty_};
+    trade_engine_->sendClientRequest(&cancel);
   }
 
   auto Slicer::onUpdate(Common::TickerId ticker_id, MarketOrderBook *book) noexcept -> void {

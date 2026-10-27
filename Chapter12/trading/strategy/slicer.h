@@ -12,8 +12,12 @@
 // a gap of so many updates is what can be checked against it.
 //
 // Each piece is priced to take liquidity: a buy at the best ask, a sell at the best bid, or, if
-// that side is empty, at the price of the piece before; whatever doesn't fill rests at that price
-// and is never cancelled. It sends its pieces directly, each order's numbered 1, 2, 3, ... (the
+// that side is empty, at the price of the piece before; and it is cancelled as soon as the exchange
+// accepts it, as an immediate-or-cancel order would be, which this exchange doesn't have: the
+// matcher has done all the piece could do before the cancel reaches it, so whatever the piece found
+// is taken and the rest withdrawn (or the cancel is rejected, the piece filled). A piece's rest left
+// resting instead stood above the market a slicer had pushed, where the others' orders met it rather
+// than rested, and the market stopped. It sends its pieces directly, each order's numbered 1, 2, 3, ... (the
 // exchange keeps a client's order ids per ticker), rather than through the order manager, which
 // keeps one order a side; and checks no risk: it is to send exactly its orders. Several orders are
 // one client's, as one firm's execution algorithm may work several at once.
@@ -108,6 +112,7 @@ namespace Trading {
 
     auto onTradeUpdate(const Exchange::MEMarketUpdate *market_update, MarketOrderBook *book) noexcept -> void;
 
+    /// A piece accepted is cancelled at once (above).
     auto onOrderUpdate(const Exchange::MEClientResponse *client_response) noexcept -> void;
 
     /// How many of order `i`'s pieces it has sent.
