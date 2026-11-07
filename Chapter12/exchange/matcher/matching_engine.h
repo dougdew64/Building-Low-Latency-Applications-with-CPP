@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "common/thread_utils.h"
 #include "common/lf_queue.h"
 #include "common/macros.h"
@@ -117,7 +119,7 @@ namespace Exchange {
     ClientResponseLFQueue *outgoing_ogw_responses_ = nullptr;
     MEMarketUpdateLFQueue *outgoing_md_updates_ = nullptr;
 
-    volatile bool run_ = false;
+    std::atomic<bool> run_{false};  // Fillscope's fork: was a volatile bool, a data race
 
     RequestRecorder *recorder_ = nullptr;
 

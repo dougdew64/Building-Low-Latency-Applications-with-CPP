@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <functional>
 
 #include "common/thread_utils.h"
@@ -151,7 +152,7 @@ namespace Exchange {
     /// Lock free queue of outgoing client responses to be sent out to connected clients.
     ClientResponseLFQueue *outgoing_responses_ = nullptr;
 
-    volatile bool run_ = false;
+    std::atomic<bool> run_{false};  // Fillscope's fork: was a volatile bool, a data race
 
     std::string time_str_;
     Logger logger_;

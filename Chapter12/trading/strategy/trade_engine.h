@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <functional>
 
 #include "common/thread_utils.h"
@@ -116,7 +117,7 @@ namespace Trading {
     Exchange::MEMarketUpdateLFQueue *incoming_md_updates_ = nullptr;
 
     Nanos last_event_time_ = 0;
-    volatile bool run_ = false;
+    std::atomic<bool> run_{false};  // Fillscope's fork: was a volatile bool, a data race
 
     std::string time_str_;
     Logger logger_;

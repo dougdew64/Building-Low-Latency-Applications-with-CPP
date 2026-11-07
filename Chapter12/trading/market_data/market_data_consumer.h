@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <map>
 
@@ -52,7 +53,7 @@ namespace Trading {
     /// Lock free queue on which decoded market data updates are pushed to, to be consumed by the trade engine.
     Exchange::MEMarketUpdateLFQueue *incoming_md_updates_ = nullptr;
 
-    volatile bool run_ = false;
+    std::atomic<bool> run_{false};  // Fillscope's fork: was a volatile bool, a data race
 
     std::string time_str_;
     Logger logger_;

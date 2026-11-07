@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "common/types.h"
 #include "common/thread_utils.h"
 #include "common/lf_queue.h"
@@ -55,7 +57,7 @@ namespace Exchange {
 
     Logger logger_;
 
-    volatile bool run_ = false;
+    std::atomic<bool> run_{false};  // Fillscope's fork: was a volatile bool, a data race
 
     std::string time_str_;
 

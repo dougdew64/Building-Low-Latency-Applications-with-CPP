@@ -28,8 +28,14 @@ namespace Common {
     const auto clock = std::chrono::system_clock::now();
     const auto time = std::chrono::system_clock::to_time_t(clock);
 
+    // Fillscope's fork: the local time into a std::tm of this call's own (localtime_r), where the
+    // book's ctime() returned one buffer the whole process shares, which every component's thread
+    // wrote at once whenever two logged together (ThreadSanitizer). The same text: HH:MM:SS.nnnnnnnnn.
+    std::tm local{};
+    localtime_r(&time, &local);
     char nanos_str[24];
-    sprintf(nanos_str, "%.8s.%09ld", ctime(&time) + 11, std::chrono::duration_cast<std::chrono::nanoseconds>(clock.time_since_epoch()).count() % NANOS_TO_SECS);
+    const auto length = std::strftime(nanos_str, sizeof(nanos_str), "%H:%M:%S", &local);
+    snprintf(nanos_str + length, sizeof(nanos_str) - length, ".%09ld", std::chrono::duration_cast<std::chrono::nanoseconds>(clock.time_since_epoch()).count() % NANOS_TO_SECS);
     time_str->assign(nanos_str);
 
     return *time_str;

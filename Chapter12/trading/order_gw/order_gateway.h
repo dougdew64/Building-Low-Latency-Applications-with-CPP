@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <functional>
 
 #include "common/thread_utils.h"
@@ -61,7 +62,7 @@ namespace Trading {
     /// Lock free queue on which we write client responses which we read and processed from the exchange, to be consumed by the trade engine.
     Exchange::ClientResponseLFQueue *incoming_responses_ = nullptr;
 
-    volatile bool run_ = false;
+    std::atomic<bool> run_{false};  // Fillscope's fork: was a volatile bool, a data race
 
     std::string time_str_;
     Logger logger_;

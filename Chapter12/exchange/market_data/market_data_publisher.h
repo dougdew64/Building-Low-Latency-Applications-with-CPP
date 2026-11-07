@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <functional>
 
 #include "market_data/snapshot_synthesizer.h"
@@ -61,7 +62,7 @@ namespace Exchange {
     /// Lock free queue on which we forward the incremental market data updates to send to the snapshot synthesizer.
     MDPMarketUpdateLFQueue snapshot_md_updates_;
 
-    volatile bool run_ = false;
+    std::atomic<bool> run_{false};  // Fillscope's fork: was a volatile bool, a data race
 
     std::string time_str_;
     Logger logger_;

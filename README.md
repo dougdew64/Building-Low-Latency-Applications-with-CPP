@@ -168,6 +168,23 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     which is mostly zero, but its log showed the bits of a side never filled
     (`vwaps:[9.49961e-317X181]`). Made in memory full of other bytes, a trade that made 30 read as a
     loss of 2.5 (`tests/position_keeper_test.cpp`). They now start at zero.
+- **Data races fixed,** which no test fails on: a race is undefined behaviour that happens to work.
+  ThreadSanitizer is the tool that sees one, and the tests aren't run under it (built with it,
+  all of them together were stopped at 9 GB of memory); each was checked with it by hand, on
+  2026-11-07, with GCC 16.2.1.
+  - Each component's flag that stops its thread (`run_`, in the matching engine, the order server,
+    the market data publisher, the snapshot synthesizer, the market data consumer, the order
+    gateway and the trade engine) was a `volatile bool`, which one thread writes and another
+    reads. `volatile` makes the compiler read it each time but orders nothing between threads; the
+    flags are now `std::atomic<bool>`, as the loggers' already were. ThreadSanitizer reports the
+    pattern in a program of a few lines, but not in the market data tests, which start and stop
+    two of these threads; likely because it counts any socket's send and receive as ordering the
+    threads that make them, and those threads all use sockets.
+  - Every log line's time (`getCurrentTimeStr()`, `common/time_utils.h`) was made with `ctime()`,
+    which returns one buffer the whole process shares, so two threads logging at once wrote it
+    together (ThreadSanitizer reported it in the market data tests). It is now made with
+    `localtime_r()`, into a buffer of the call's own, as the same text
+    (`tests/time_utils_test.cpp`).
 
 **Known issues,** not fixed (yet):
 - **A book holds at most 255 price levels at once.** Its pool of levels has 256 blocks, and taking
