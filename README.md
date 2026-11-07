@@ -161,6 +161,13 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     stale pointers; the client makes its books once, in fresh memory, which hid it. Both now
     start empty. Fillscope checks every order the two strategies send against their rules, on
     the real exchange (its `session_system_tests`).
+  - The trading client's position keeper (`trading/strategy/position_keeper.h`) never initialized
+    each ticker's sums of price times quantity, one a side, from which a position's average price
+    comes, so a fill was added to whatever the memory held, and the profit and loss the risk check
+    reads (`LOSS_TOO_LARGE`) was off by it. The client makes its keeper once, in fresh memory,
+    which is mostly zero, but its log showed the bits of a side never filled
+    (`vwaps:[9.49961e-317X181]`). Made in memory full of other bytes, a trade that made 30 read as a
+    loss of 2.5 (`tests/position_keeper_test.cpp`). They now start at zero.
 
 **Known issues,** not fixed (yet):
 - **A book holds at most 255 price levels at once.** Its pool of levels has 256 blocks, and taking
