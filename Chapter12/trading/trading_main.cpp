@@ -137,6 +137,16 @@ int main(int argc, char **argv) {
   // For the random trading algorithm, we simply implement it here instead of creating a new trading algorithm which is another possibility.
   // Generate random orders with random attributes and randomly cancel some of them.
   if (algo_type == AlgoType::RANDOM) {
+    // Fillscope's fork: this thread writes the request queue itself, and logs in its own logger.
+    // The book's code sent through trade_engine->sendClientRequest(), which logs in the engine's
+    // logger, from this thread, while the engine's thread logs there too: a logger's queue takes one
+    // writer, and the two garbled each other's lines.
+    const auto send = [&](const Exchange::MEClientRequest &request) {
+      logger->log("%:% %() % Sending %\n", __FILE__, __LINE__, __FUNCTION__, Common::getCurrentTimeStr(&time_str),
+                  request.toString().c_str());
+      *client_requests.getNextToWriteTo() = request;
+      client_requests.updateWriteIndex();
+    };
     Common::OrderId order_id = client_id * 1000;
     std::vector<Exchange::MEClientRequest> client_requests_vec;
     std::array<Price, ME_MAX_TICKERS> ticker_base_price;
@@ -150,14 +160,14 @@ int main(int argc, char **argv) {
 
       Exchange::MEClientRequest new_request{Exchange::ClientRequestType::NEW, client_id, ticker_id, order_id++, side,
                                             price, qty};
-      trade_engine->sendClientRequest(&new_request);
+      send(new_request);
       usleep(sleep_time);
 
       client_requests_vec.push_back(new_request);
       const auto cxl_index = rand() % client_requests_vec.size();
       auto cxl_request = client_requests_vec[cxl_index];
       cxl_request.type_ = Exchange::ClientRequestType::CANCEL;
-      trade_engine->sendClientRequest(&cxl_request);
+      send(cxl_request);
       usleep(sleep_time);
 
       if (trade_engine->silentSeconds() >= 60) {

@@ -168,6 +168,13 @@ chapters are as upstream has them. (At the top level it adds this section, a `CL
     which is mostly zero, but its log showed the bits of a side never filled
     (`vwaps:[9.49961e-317X181]`). Made in memory full of other bytes, a trade that made 30 read as a
     loss of 2.5 (`tests/position_keeper_test.cpp`). They now start at zero.
+  - The random client's log was garbled. Its orders are made on `main`'s thread
+    (`trading/trading_main.cpp`), which sent each through the trade engine's
+    `sendClientRequest()`, so it logged in the engine's logger while the engine's own thread
+    logged there too; a logger's queue takes one writer, and in a session 960 of the log's 27,082
+    lines were garbled (Fillscope's `session_system_tests`, which checks every trade engine's log
+    is whole lines). `main` now writes the request queue itself and logs in its own logger
+    (`trading_main_5.log`).
 - **Data races fixed,** which no test fails on: a race is undefined behaviour that happens to work.
   ThreadSanitizer is the tool that sees one, and the tests aren't run under it (built with it,
   all of them together were stopped at 9 GB of memory); each was checked with it by hand, on
